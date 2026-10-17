@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
-import { ArrowLeft, Bookmark as BookmarkIcon, BookmarkCheck, ChevronLeft, ChevronRight, List, NotebookPen, Sparkles, Type } from 'lucide-react';
+import { ArrowLeft, Bookmark as BookmarkIcon, BookmarkCheck, ChevronLeft, ChevronRight, List, NotebookPen, Sparkles, Square, Type, Volume2 } from 'lucide-react';
 import { HIGHLIGHT_COLORS, selectionInfo, splitByHighlights } from '@/lib/annotations';
 import { deleteAnnotation, listAnnotations, putAnnotation } from '@/lib/db';
 import type { Annotation, Book, Bookmark, Highlight, HighlightColor, Note, ReaderPrefs } from '@/lib/types';
@@ -19,6 +19,7 @@ import {
 import { ChapterDrawer, SettingsPanel } from './ReaderPanels';
 import NotesPanel, { type NotesTab } from './NotesPanel';
 import SummaryPanel from './SummaryPanel';
+import { readAloud, useGenericVoices, useNarrationPreference } from '@/lib/voice/generic';
 import SelectionToolbar, { type ToolbarState } from './SelectionToolbar';
 import Toast, { type ToastState } from './Toast';
 
@@ -57,6 +58,19 @@ export default function Reader({ id }: { id: string }) {
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [toolbar, setToolbar] = useState<ToolbarState | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
+  // Read aloud with a built-in voice. The voice is chosen in Voice Studio.
+  const [reading, setReading] = useState(false);
+  const readStop = useRef<(() => void) | null>(null);
+  const { resolved: voices, supported: ttsSupported } = useGenericVoices();
+  const [narrator] = useNarrationPreference();
+  // Reading stops when the chapter changes or the reader closes.
+  useEffect(
+    () => () => {
+      readStop.current?.();
+      readStop.current = null;
+    },
+    [chapterIndex],
+  );
 
   // Refs mirror state for event handlers and cleanup, so they never see stale values.
   const chapterRef = useRef(0);
@@ -399,6 +413,25 @@ export default function Reader({ id }: { id: string }) {
   const chapter = book.chapters[ci];
   const percent = clamp(Math.round(((ci + ratio) / total) * 100), 0, 100);
   const colors = readerColors(prefs);
+
+  function toggleRead() {
+    if (reading) {
+      readStop.current?.();
+      readStop.current = null;
+      setReading(false);
+      return;
+    }
+    if (!voices) return;
+    setReading(true);
+    readStop.current = readAloud(chapter.paragraphs, voices[narrator], {
+      onStart: (i) => document.querySelector<HTMLElement>(`[data-p="${i}"]`)?.scrollIntoView({ block: 'center' }),
+      onDone: (completed) => {
+        readStop.current = null;
+        setReading(false);
+        if (completed) notify('Finished reading this chapter.');
+      },
+    });
+  }
   const double = prefs.layout === 'double';
   const width = COLUMN_WIDTH[prefs.margin][double ? 'double' : 'single'];
   const rootStyle = {
@@ -435,6 +468,18 @@ export default function Reader({ id }: { id: string }) {
         <button type="button" className="icon-btn shrink-0" aria-label="Notes and highlights" onClick={() => setPanel('notes')}>
           <NotebookPen className="h-4 w-4" strokeWidth={1.75} />
         </button>
+        {ttsSupported && (
+          <button
+            type="button"
+            className="icon-btn shrink-0"
+            aria-label={reading ? 'Stop reading aloud' : 'Read this chapter aloud'}
+            aria-pressed={reading}
+            onClick={toggleRead}
+            disabled={!voices}
+          >
+            {reading ? <Square className="h-4 w-4" strokeWidth={1.75} /> : <Volume2 className="h-4 w-4" strokeWidth={1.75} />}
+          </button>
+        )}
         <button type="button" className="icon-btn shrink-0" aria-label="Smart summary" onClick={() => setPanel('summary')}>
           <Sparkles className="h-4 w-4" strokeWidth={1.75} />
         </button>

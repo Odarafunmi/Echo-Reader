@@ -27,6 +27,7 @@ import { ProviderNotConfiguredError, unconfiguredProvider } from '@/lib/voice/pr
 import { LEVEL_BARS, useRecorder, type Take } from '@/lib/voice/useRecorder';
 import { listen, speechRecognitionSupported } from '@/lib/voice/speech';
 import type { VoiceProfile, VoiceSample } from '@/lib/types';
+import GenericVoicePicker from './GenericVoicePicker';
 import Toast, { type ToastState } from './Toast';
 
 type Step = 'consent' | 'record' | 'verify' | 'ready';
@@ -173,6 +174,8 @@ export default function VoiceStudio() {
           <ReadyStep samples={samples} seconds={seconds} onRemove={removeSample} onDeleteAll={deleteEverything} notify={notify} />
         )}
       </div>
+
+      <GenericVoicePicker />
 
       <Toast toast={toast} onDone={dismiss} />
     </div>
