@@ -1,10 +1,7 @@
 'use client';
 
-// Built-in narration voices. They use the speech voices installed on this device (macOS, Windows,
-// Android, Chrome's Google voices), so nothing is sent to a server and no API key is needed.
-// The browser does not report a voice's gender, so each gender is matched by voice name. If the
-// device has no voice that matches a gender, that gender uses the device's default voice with a
-// different pitch so the two options still sound distinct.
+// Shared pieces for the built-in narration voices: gender names, the device voice matching,
+// and the saved choice. The engines themselves live in narrators.ts.
 
 import { useEffect, useState } from 'react';
 
@@ -16,13 +13,13 @@ export const GENDER_LABEL: Record<Gender, string> = {
   feminine: 'Feminine voice',
 };
 
-/** Names of common system voices. Used only to pick a voice for each gender. */
+/** Names of common system voices. Used only to pick a device voice for each gender. */
 const FEMALE_NAME =
   /\b(female|samantha|karen|moira|tessa|fiona|victoria|zira|hazel|susan|aria|jenny|ana|libby|sonia|catherine|serena|kate|sara|allison|ava|joanna|kendra|kimberly|salli|emma|amy|ivy|olivia|nicole|sky|google us english)\b/i;
 const MALE_NAME =
   /\b(male|daniel|alex|fred|tom|david|mark|james|george|guy|ryan|liam|eddy|oliver|thomas|aaron|arthur|brian|matthew|justin|joey|stephen|kevin|rishi)\b/i;
 
-/** Fallback pitch and rate, used when no installed voice matches the gender. */
+/** Fallback pitch and rate, used when no device voice matches the gender. */
 const FALLBACK: Record<Gender, { pitch: number; rate: number }> = {
   masculine: { pitch: 0.82, rate: 0.95 },
   feminine: { pitch: 1.18, rate: 1 },
@@ -51,7 +48,7 @@ function matchesGender(name: string, gender: Gender): boolean {
   return gender === 'feminine' ? female : male;
 }
 
-/** Chooses one voice per gender from the device's voices. Pure, so it can be tested without a browser. */
+/** Chooses one device voice per gender. Pure, so it can be tested without a browser. */
 export function resolveVoices(all: SpeechSynthesisVoice[]): Record<Gender, ResolvedVoice> {
   const english = all.filter((v) => v.lang?.toLowerCase().startsWith('en'));
   const pool = english.length > 0 ? english : all;
@@ -74,7 +71,7 @@ export function resolveVoices(all: SpeechSynthesisVoice[]): Record<Gender, Resol
 }
 
 /** Loads the device voices, which some browsers report only after `voiceschanged`. */
-export function useGenericVoices(): { resolved: Record<Gender, ResolvedVoice> | null; supported: boolean } {
+export function useDeviceVoices(): { resolved: Record<Gender, ResolvedVoice> | null; supported: boolean } {
   const [resolved, setResolved] = useState<Record<Gender, ResolvedVoice> | null>(null);
   const [supported, setSupported] = useState(true);
 
@@ -94,102 +91,56 @@ export function useGenericVoices(): { resolved: Record<Gender, ResolvedVoice> | 
   return { resolved, supported };
 }
 
-const PREF_KEY = 'echo-shelf:narration-voice';
+/* ---------- Saved choice ---------- */
 
-/** The gender the user chose for narration. Defaults to feminine. */
-export function getNarrationPreference(): Gender {
+const GENDER_KEY = 'echo-shelf:narration-voice';
+const ENGINE_KEY = 'echo-shelf:narration-engine';
+
+export type Engine = 'device' | 'kokoro' | 'espeak';
+export const ENGINES: Engine[] = ['device', 'kokoro', 'espeak'];
+
+function readStored(key: string): string | null {
   try {
-    return localStorage.getItem(PREF_KEY) === 'masculine' ? 'masculine' : 'feminine';
+    return localStorage.getItem(key);
   } catch {
-    return 'feminine';
+    return null;
   }
 }
 
-export function saveNarrationPreference(g: Gender) {
+function writeStored(key: string, value: string) {
   try {
-    localStorage.setItem(PREF_KEY, g);
+    localStorage.setItem(key, value);
   } catch {
     // Storage can be unavailable (private mode). The choice then lasts for this visit only.
   }
 }
 
-export function useNarrationPreference(): [Gender, (g: Gender) => void] {
-  const [gender, setGender] = useState<Gender>('feminine');
+/** The engine and gender the user chose for narration. Defaults to device voices, feminine. */
+export function useNarrationChoice(): {
+  engine: Engine;
+  gender: Gender;
+  setEngine: (e: Engine) => void;
+  setGender: (g: Gender) => void;
+} {
+  const [engine, setEngineState] = useState<Engine>('device');
+  const [gender, setGenderState] = useState<Gender>('feminine');
+
   useEffect(() => {
-    setGender(getNarrationPreference());
+    const e = readStored(ENGINE_KEY);
+    if (e === 'kokoro' || e === 'espeak' || e === 'device') setEngineState(e);
+    setGenderState(readStored(GENDER_KEY) === 'masculine' ? 'masculine' : 'feminine');
   }, []);
-  const update = (g: Gender) => {
-    setGender(g);
-    saveNarrationPreference(g);
+
+  return {
+    engine,
+    gender,
+    setEngine: (e) => {
+      setEngineState(e);
+      writeStored(ENGINE_KEY, e);
+    },
+    setGender: (g) => {
+      setGenderState(g);
+      writeStored(GENDER_KEY, g);
+    },
   };
-  return [gender, update];
-}
-
-function utteranceFor(text: string, v: ResolvedVoice): SpeechSynthesisUtterance {
-  const u = new SpeechSynthesisUtterance(text);
-  if (v.voice) {
-    u.voice = v.voice;
-    u.lang = v.voice.lang;
-  } else {
-    u.lang = 'en-US';
-  }
-  u.pitch = v.pitch;
-  u.rate = v.rate;
-  return u;
-}
-
-/**
- * Reads the parts one after another, so long chapters do not hit the browser's per-utterance limit.
- * `onStart` fires with each part's index. `onDone(true)` means the whole list was read, and
- * `onDone(false)` means it was stopped or failed. The returned function stops reading.
- */
-export function readAloud(
-  parts: string[],
-  v: ResolvedVoice,
-  cb: { onStart?: (index: number) => void; onDone: (completed: boolean) => void },
-): () => void {
-  const synth = window.speechSynthesis;
-  synth.cancel();
-
-  let index = 0;
-  let stopped = false;
-  let finished = false;
-  const finish = (completed: boolean) => {
-    if (finished) return;
-    finished = true;
-    cb.onDone(completed);
-  };
-
-  const next = () => {
-    if (stopped) return;
-    while (index < parts.length && !parts[index].trim()) index++;
-    if (index >= parts.length) {
-      stopped = true;
-      finish(true);
-      return;
-    }
-    const current = index++;
-    cb.onStart?.(current);
-    const u = utteranceFor(parts[current], v);
-    u.onend = next;
-    u.onerror = () => {
-      if (stopped) return;
-      stopped = true;
-      finish(false);
-    };
-    synth.speak(u);
-  };
-
-  next();
-
-  return () => {
-    stopped = true;
-    synth.cancel();
-    finish(false);
-  };
-}
-
-/** Speaks one short phrase, for previews. Returns a function that stops it. */
-export function speakPreview(text: string, v: ResolvedVoice, onDone?: () => void): () => void {
-  return readAloud([text], v, { onDone: () => onDone?.() });
 }
