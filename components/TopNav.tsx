@@ -1,0 +1,51 @@
+import Link from 'next/link';
+import { BookOpen } from 'lucide-react';
+
+const tabs = [
+  { label: 'My Library', href: '/', active: true },
+  { label: 'Notes', href: '#', active: false, soon: true },
+  { label: 'Voice Studio', href: '#', active: false, soon: true },
+];
+
+export default function TopNav() {
+  return (
+    <header className="sticky top-0 z-30 border-b border-line/60 bg-ink/70 backdrop-blur-xl">
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4">
+        <Link href="/" className="flex items-center gap-2 font-display text-lg font-semibold tracking-tight">
+          <span className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-violet to-magenta shadow-glow">
+            <BookOpen className="h-4 w-4 text-white" strokeWidth={1.75} />
+          </span>
+          Echo Shelf
+        </Link>
+        <nav aria-label="Main" className="flex items-center gap-1 rounded-full border border-line bg-card p-1">
+          {tabs.map((t) =>
+            t.soon ? (
+              <span
+                key={t.label}
+                aria-disabled="true"
+                className="hidden cursor-not-allowed items-center gap-1.5 rounded-full px-4 py-1.5 text-sm text-fg-3 sm:inline-flex"
+              >
+                {t.label}
+                <span className="rounded-full bg-raised px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-fg-3">
+                  Soon
+                </span>
+              </span>
+            ) : (
+              <Link
+                key={t.label}
+                href={t.href}
+                aria-current={t.active ? 'page' : undefined}
+                className={
+                  'rounded-full px-4 py-1.5 text-sm font-medium transition-colors duration-250 ease-soft ' +
+                  (t.active ? 'bg-violet text-white shadow-glow' : 'text-fg-2 hover:text-fg')
+                }
+              >
+                {t.label}
+              </Link>
+            ),
+          )}
+        </nav>
+      </div>
+    </header>
+  );
+}
