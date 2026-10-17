@@ -114,3 +114,13 @@ export interface VoiceSample {
   blob: Blob;
   createdAt: number;
 }
+
+/** A generated summary. `scope` is 'doc' for the whole book, or 'ch:<index>' for one chapter. */
+export interface Summary {
+  id: string;
+  bookId: string;
+  scope: string;
+  text: string;
+  source: 'ai' | 'offline';
+  createdAt: number;
+}

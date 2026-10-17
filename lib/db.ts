@@ -1,9 +1,9 @@
 // IndexedDB storage for the user's books and annotations. Everything stays in the browser for now;
 // the PRD's Supabase backend will replace this layer later.
-import type { Annotation, BookContent, BookMeta, VoiceProfile, VoiceSample } from './types';
+import type { Annotation, BookContent, BookMeta, Summary, VoiceProfile, VoiceSample } from './types';
 
 const DB_NAME = 'echo-shelf';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -20,6 +20,10 @@ function openDb(): Promise<IDBDatabase> {
           store.createIndex('bookId', 'bookId', { unique: false });
         }
         if (!db.objectStoreNames.contains('voices')) db.createObjectStore('voices', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('summaries')) {
+          const summaries = db.createObjectStore('summaries', { keyPath: 'id' });
+          summaries.createIndex('bookId', 'bookId', { unique: false });
+        }
         if (!db.objectStoreNames.contains('voice_samples')) {
           const samples = db.createObjectStore('voice_samples', { keyPath: 'id' });
           samples.createIndex('profileId', 'profileId', { unique: false });
@@ -117,13 +121,18 @@ export async function deleteAnnotation(id: string): Promise<void> {
 export async function deleteBook(id: string): Promise<void> {
   const db = await openDb();
   await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(['meta', 'content', 'annotations'], 'readwrite');
+    const tx = db.transaction(['meta', 'content', 'annotations', 'summaries'], 'readwrite');
     tx.objectStore('meta').delete(id);
     tx.objectStore('content').delete(id);
     const store = tx.objectStore('annotations');
     const req = store.index('bookId').getAllKeys(id);
     req.onsuccess = () => {
       for (const key of req.result) store.delete(key);
+    };
+    const summaries = tx.objectStore('summaries');
+    const sreq = summaries.index('bookId').getAllKeys(id);
+    sreq.onsuccess = () => {
+      for (const key of sreq.result) summaries.delete(key);
     };
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
@@ -182,5 +191,29 @@ export async function deleteAllVoiceData(): Promise<void> {
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error ?? new Error('Transaction aborted'));
+  });
+}
+
+/* ---------- Summaries ---------- */
+
+export async function listSummaries(bookId: string): Promise<Summary[]> {
+  const db = await openDb();
+  return new Promise<Summary[]>((resolve, reject) => {
+    const tx = db.transaction('summaries', 'readonly');
+    const req = tx.objectStore('summaries').index('bookId').getAll(bookId);
+    req.onsuccess = () => resolve(req.result as Summary[]);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function putSummary(s: Summary): Promise<void> {
+  await run(['summaries'], 'readwrite', (tx) => {
+    tx.objectStore('summaries').put(s);
+  });
+}
+
+export async function deleteSummary(id: string): Promise<void> {
+  await run(['summaries'], 'readwrite', (tx) => {
+    tx.objectStore('summaries').delete(id);
   });
 }

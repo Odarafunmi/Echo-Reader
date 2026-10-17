@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
-import { ArrowLeft, Bookmark as BookmarkIcon, BookmarkCheck, ChevronLeft, ChevronRight, List, NotebookPen, Type } from 'lucide-react';
+import { ArrowLeft, Bookmark as BookmarkIcon, BookmarkCheck, ChevronLeft, ChevronRight, List, NotebookPen, Sparkles, Type } from 'lucide-react';
 import { HIGHLIGHT_COLORS, selectionInfo, splitByHighlights } from '@/lib/annotations';
 import { deleteAnnotation, listAnnotations, putAnnotation } from '@/lib/db';
 import type { Annotation, Book, Bookmark, Highlight, HighlightColor, Note, ReaderPrefs } from '@/lib/types';
@@ -18,6 +18,7 @@ import {
 } from '@/lib/library';
 import { ChapterDrawer, SettingsPanel } from './ReaderPanels';
 import NotesPanel, { type NotesTab } from './NotesPanel';
+import SummaryPanel from './SummaryPanel';
 import SelectionToolbar, { type ToolbarState } from './SelectionToolbar';
 import Toast, { type ToastState } from './Toast';
 
@@ -38,7 +39,7 @@ const COLUMN_WIDTH: Record<ReaderPrefs['margin'], { single: number; double: numb
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 const newId = () => crypto.randomUUID();
 
-type Panel = null | 'chapters' | 'settings' | 'notes';
+type Panel = null | 'chapters' | 'settings' | 'notes' | 'summary';
 interface Jump {
   ratio?: number;
   paragraph?: number;
@@ -77,6 +78,7 @@ export default function Reader({ id }: { id: string }) {
         if (!alive) return;
         setBook(b);
         if (!b) return;
+        if (new URLSearchParams(window.location.search).get('panel') === 'summary') setPanel('summary');
         const queued = takeJump(id);
         const saved = getProgressMap()[id];
         const start = queued
@@ -433,6 +435,9 @@ export default function Reader({ id }: { id: string }) {
         <button type="button" className="icon-btn shrink-0" aria-label="Notes and highlights" onClick={() => setPanel('notes')}>
           <NotebookPen className="h-4 w-4" strokeWidth={1.75} />
         </button>
+        <button type="button" className="icon-btn shrink-0" aria-label="Smart summary" onClick={() => setPanel('summary')}>
+          <Sparkles className="h-4 w-4" strokeWidth={1.75} />
+        </button>
         <button type="button" className="icon-btn shrink-0" aria-label="Chapters" onClick={() => setPanel('chapters')}>
           <List className="h-4 w-4" strokeWidth={1.75} />
         </button>
@@ -551,6 +556,9 @@ export default function Reader({ id }: { id: string }) {
           onJump={(chapter, target) => goTo(chapter, target)}
           onClose={() => setPanel(null)}
         />
+      )}
+      {panel === 'summary' && (
+        <SummaryPanel book={book} currentChapter={ci} onClose={() => setPanel(null)} />
       )}
       {panel === 'settings' && (
         <SettingsPanel

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Trash2 } from 'lucide-react';
+import { Sparkles, Trash2 } from 'lucide-react';
 import type { BookMeta, BookFormat } from '@/lib/types';
 import { coverGradient } from '@/lib/library';
 import ProgressBar from './ProgressBar';
@@ -46,11 +46,19 @@ export default function BookCard({
           <ProgressBar percent={percent} />
         </div>
       </div>
+      <Link
+        href={`/read/${book.id}?panel=summary`}
+        aria-label={`Summarise ${book.title}`}
+        title="Smart summary"
+        className="absolute right-12 top-3 grid h-8 w-8 place-items-center rounded-full bg-ink/60 text-fg-2 opacity-0 backdrop-blur transition-opacity duration-300 hover:text-cyan focus:opacity-100 group-hover:opacity-100"
+      >
+        <Sparkles className="h-4 w-4" strokeWidth={1.75} />
+      </Link>
       <button
         type="button"
         onClick={() => onRemove(book)}
         aria-label={`Remove ${book.title}`}
-        className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full bg-ink/60 text-fg-2 opacity-0 backdrop-blur transition-opacity duration-250 hover:text-rose focus:opacity-100 group-hover:opacity-100"
+        className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full bg-ink/60 text-fg-2 opacity-0 backdrop-blur transition-opacity duration-300 hover:text-rose focus:opacity-100 group-hover:opacity-100"
       >
         <Trash2 className="h-4 w-4" strokeWidth={1.75} />
       </button>
