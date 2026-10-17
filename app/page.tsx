@@ -4,7 +4,7 @@ import TopNav from '@/components/TopNav';
 export default function Home() {
   return (
     <>
-      <TopNav />
+      <TopNav current="library" />
       <main>
         <Shelf />
       </main>

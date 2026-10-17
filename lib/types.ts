@@ -89,3 +89,28 @@ export interface Note extends AnnotationBase {
 }
 
 export type Annotation = Highlight | Bookmark | Note;
+
+/** The user's voice profile. MVP keeps exactly one, with id `me`. */
+export interface VoiceProfile {
+  id: 'me';
+  name: string;
+  consentAt: number;
+  consentVersion: number;
+  verifiedAt?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type VoiceSampleKind = 'script' | 'verify';
+
+/** One recorded clip. The audio blob lives in IndexedDB, not in localStorage. */
+export interface VoiceSample {
+  id: string;
+  profileId: 'me';
+  kind: VoiceSampleKind;
+  label: string;
+  seconds: number;
+  mimeType: string;
+  blob: Blob;
+  createdAt: number;
+}

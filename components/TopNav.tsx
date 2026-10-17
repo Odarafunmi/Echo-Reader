@@ -1,13 +1,15 @@
 import Link from 'next/link';
 import { BookOpen } from 'lucide-react';
 
-const tabs = [
-  { label: 'My Library', href: '/', active: true },
-  { label: 'Notes', href: '#', active: false, soon: true },
-  { label: 'Voice Studio', href: '#', active: false, soon: true },
+export type NavSection = 'library' | 'voice';
+
+const tabs: { id: NavSection | 'notes'; label: string; href: string; soon?: boolean }[] = [
+  { id: 'library', label: 'My Library', href: '/' },
+  { id: 'notes', label: 'Notes', href: '#', soon: true },
+  { id: 'voice', label: 'Voice Studio', href: '/voice' },
 ];
 
-export default function TopNav() {
+export default function TopNav({ current }: { current: NavSection }) {
   return (
     <header className="sticky top-0 z-30 border-b border-line/60 bg-ink/70 backdrop-blur-xl">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4">
@@ -18,32 +20,34 @@ export default function TopNav() {
           Echo Shelf
         </Link>
         <nav aria-label="Main" className="flex items-center gap-1 rounded-full border border-line bg-card p-1">
-          {tabs.map((t) =>
-            t.soon ? (
-              <span
-                key={t.label}
-                aria-disabled="true"
-                className="hidden cursor-not-allowed items-center gap-1.5 rounded-full px-4 py-1.5 text-sm text-fg-3 sm:inline-flex"
-              >
-                {t.label}
-                <span className="rounded-full bg-raised px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-fg-3">
-                  Soon
+          {tabs.map((t) => {
+            const active = t.id === current;
+            if (t.soon) {
+              return (
+                <span
+                  key={t.id}
+                  aria-disabled="true"
+                  className="hidden cursor-not-allowed items-center gap-1.5 rounded-full px-4 py-1.5 text-sm text-fg-3 sm:inline-flex"
+                >
+                  {t.label}
+                  <span className="rounded-full bg-raised px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-fg-3">Soon</span>
                 </span>
-              </span>
-            ) : (
+              );
+            }
+            return (
               <Link
-                key={t.label}
+                key={t.id}
                 href={t.href}
-                aria-current={t.active ? 'page' : undefined}
+                aria-current={active ? 'page' : undefined}
                 className={
                   'rounded-full px-4 py-1.5 text-sm font-medium transition-colors duration-250 ease-soft ' +
-                  (t.active ? 'bg-violet text-white shadow-glow' : 'text-fg-2 hover:text-fg')
+                  (active ? 'bg-violet text-white shadow-glow' : 'text-fg-2 hover:text-fg')
                 }
               >
                 {t.label}
               </Link>
-            ),
-          )}
+            );
+          })}
         </nav>
       </div>
     </header>
