@@ -51,3 +51,41 @@ export interface ReaderPrefs {
   customFg: string;
   layout: ReaderLayout;
 }
+
+export type HighlightColor = 'amber' | 'magenta' | 'cyan';
+
+interface AnnotationBase {
+  id: string;
+  bookId: string;
+  createdAt: number;
+}
+
+/** A coloured span inside one paragraph. Offsets are character indexes into the paragraph text. */
+export interface Highlight extends AnnotationBase {
+  kind: 'highlight';
+  chapter: number;
+  paragraph: number;
+  start: number;
+  end: number;
+  text: string;
+  color: HighlightColor;
+}
+
+export interface Bookmark extends AnnotationBase {
+  kind: 'bookmark';
+  chapter: number;
+  ratio: number;
+  label: string;
+}
+
+/** A note, optionally pinned to a quote and to the highlight it came from. */
+export interface Note extends AnnotationBase {
+  kind: 'note';
+  chapter: number;
+  body: string;
+  quote?: string;
+  highlightId?: string;
+  updatedAt: number;
+}
+
+export type Annotation = Highlight | Bookmark | Note;
