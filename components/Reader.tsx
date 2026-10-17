@@ -12,6 +12,7 @@ import {
   getProgressMap,
   loadBook,
   readerColors,
+  takeJump,
   savePrefs,
   saveProgress,
 } from '@/lib/library';
@@ -76,12 +77,17 @@ export default function Reader({ id }: { id: string }) {
         if (!alive) return;
         setBook(b);
         if (!b) return;
+        const queued = takeJump(id);
         const saved = getProgressMap()[id];
-        const start = saved ? clamp(saved.chapter, 0, b.chapters.length - 1) : 0;
-        const startRatio = saved && saved.chapter === start ? saved.ratio : 0;
+        const start = queued
+          ? clamp(queued.chapter, 0, b.chapters.length - 1)
+          : saved
+            ? clamp(saved.chapter, 0, b.chapters.length - 1)
+            : 0;
+        const startRatio = queued ? queued.ratio ?? 0 : saved && saved.chapter === start ? saved.ratio : 0;
         chapterRef.current = start;
         ratioRef.current = startRatio;
-        pendingScroll.current = { ratio: startRatio };
+        pendingScroll.current = queued ? { ratio: startRatio, paragraph: queued.paragraph } : { ratio: startRatio };
         setChapterIndex(start);
         setRatio(startRatio);
         const list = await listAnnotations(id);

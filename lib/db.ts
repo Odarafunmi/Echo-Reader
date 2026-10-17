@@ -90,6 +90,18 @@ export async function listAnnotations(bookId: string): Promise<Annotation[]> {
   return rows.sort((a, b) => a.createdAt - b.createdAt);
 }
 
+/** Every annotation in the library, used by the Notes page. */
+export async function listAllAnnotations(): Promise<Annotation[]> {
+  const db = await openDb();
+  const rows = await new Promise<Annotation[]>((resolve, reject) => {
+    const tx = db.transaction('annotations', 'readonly');
+    const req = tx.objectStore('annotations').getAll();
+    req.onsuccess = () => resolve(req.result as Annotation[]);
+    req.onerror = () => reject(req.error);
+  });
+  return rows.sort((a, b) => b.createdAt - a.createdAt);
+}
+
 export async function putAnnotation(a: Annotation): Promise<void> {
   await run(['annotations'], 'readwrite', (tx) => {
     tx.objectStore('annotations').put(a);

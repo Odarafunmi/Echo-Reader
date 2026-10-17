@@ -1,11 +1,11 @@
 import Link from 'next/link';
 import { BookOpen } from 'lucide-react';
 
-export type NavSection = 'library' | 'voice';
+export type NavSection = 'library' | 'notes' | 'voice';
 
-const tabs: { id: NavSection | 'notes'; label: string; href: string; soon?: boolean }[] = [
+const tabs: { id: NavSection; label: string; href: string }[] = [
   { id: 'library', label: 'My Library', href: '/' },
-  { id: 'notes', label: 'Notes', href: '#', soon: true },
+  { id: 'notes', label: 'Notes', href: '/notes' },
   { id: 'voice', label: 'Voice Studio', href: '/voice' },
 ];
 
@@ -22,18 +22,6 @@ export default function TopNav({ current }: { current: NavSection }) {
         <nav aria-label="Main" className="flex items-center gap-1 rounded-full border border-line bg-card p-1">
           {tabs.map((t) => {
             const active = t.id === current;
-            if (t.soon) {
-              return (
-                <span
-                  key={t.id}
-                  aria-disabled="true"
-                  className="hidden cursor-not-allowed items-center gap-1.5 rounded-full px-4 py-1.5 text-sm text-fg-3 sm:inline-flex"
-                >
-                  {t.label}
-                  <span className="rounded-full bg-raised px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-fg-3">Soon</span>
-                </span>
-              );
-            }
             return (
               <Link
                 key={t.id}

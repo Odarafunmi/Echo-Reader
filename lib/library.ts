@@ -112,3 +112,33 @@ export function readerColors(p: ReaderPrefs): { bg: string; fg: string } {
   if (p.theme === 'custom') return { bg: p.customBg, fg: p.customFg };
   return READER_THEMES[p.theme];
 }
+
+// ---- Jump handoff (Notes page -> reader) ----
+
+const JUMP_KEY = 'echo-shelf:jump';
+
+export interface QueuedJump {
+  bookId: string;
+  chapter: number;
+  paragraph?: number;
+  ratio?: number;
+}
+
+/** Remember where the reader should open next. Read once by the reader on load. */
+export function queueJump(jump: QueuedJump): void {
+  sessionStorage.setItem(JUMP_KEY, JSON.stringify(jump));
+}
+
+/** Returns the queued jump for this book, if any, and clears it. */
+export function takeJump(bookId: string): QueuedJump | null {
+  try {
+    const raw = sessionStorage.getItem(JUMP_KEY);
+    if (!raw) return null;
+    const jump = JSON.parse(raw) as QueuedJump;
+    if (jump.bookId !== bookId) return null;
+    sessionStorage.removeItem(JUMP_KEY);
+    return jump;
+  } catch {
+    return null;
+  }
+}
