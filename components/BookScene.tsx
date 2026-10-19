@@ -1,41 +1,55 @@
 'use client';
 
-// A slow field of wireframe books in 3D. The books drift, turn, and are gently pushed away by the cursor.
-// Reduced motion gets one still frame. If WebGL is unavailable, nothing is drawn and the page keeps its blobs.
+// A field of wireframe books flying through 3D behind the page.
+//
+// The books travel on their own headings, wrap from one edge of the frame to the
+// other, tumble as they go, and dim with distance. The cursor shoves nearby books
+// aside and a click sends a shockwave through the field that lights them up.
+// The shapes live in lib/scene/books.ts and the motion in lib/scene/field.ts, so
+// both can be exercised outside a browser.
+//
+// Reduced motion gets one still frame. Touch screens and tabs that are not visible
+// do not animate. Without WebGL nothing is drawn and the ambient blobs carry the page.
 
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
-
-type Kind = 'hardcover' | 'paperback' | 'tome' | 'square' | 'open';
-
-// Width, height and depth in scene units.
-const DIMS: Record<Exclude<Kind, 'open'>, [number, number, number]> = {
-  hardcover: [1.0, 1.42, 0.2],
-  paperback: [0.82, 1.22, 0.1],
-  tome: [1.12, 1.56, 0.5],
-  square: [1.36, 1.36, 0.16],
-};
-const KINDS: Kind[] = ['hardcover', 'paperback', 'open', 'tome', 'square', 'paperback', 'hardcover', 'open'];
+import { buildBook, KINDS } from '@/lib/scene/books';
+import { isScenePaused, subscribeScenePause } from '@/lib/scene/bus';
+import {
+  depthFade,
+  makeBody,
+  shock,
+  stepBody,
+  type Body,
+  type Bounds,
+  type Pointer,
+} from '@/lib/scene/field';
 
 const CAM_Z = 14;
 const FOV = 42;
-const REPEL_RADIUS = 2.6;
-const SPRING_K = 18;
-const SPRING_D = 7;
+const MAGENTA = 0xe879f9;
+/** How much a full click flash adds to a book's line opacity. */
+const GLOW_BOOST = 0.45;
 
-interface Body {
+/**
+ * Line colours per app theme. On a pale ground the violet has to darken and hold
+ * its opacity, or the field disappears into the background.
+ */
+const PALETTES = {
+  dark: { outer: 0x8b5cf6, inner: 0xc4b5fd, outerOpacity: 0.5, innerOpacity: 0.18 },
+  light: { outer: 0x6d28d9, inner: 0x7c3aed, outerOpacity: 0.55, innerOpacity: 0.24 },
+} as const;
+
+export type SceneVariant = keyof typeof PALETTES;
+
+/** Reused scratch colour so the frame loop allocates nothing. */
+const flash = new THREE.Color();
+
+interface Book {
   group: THREE.Group;
-  home: THREE.Vector3; // position in the scene, before drift and push
-  nx: number; // home position in normalised screen space (-1..1), so it survives resizing
-  ny: number;
-  z: number;
-  offset: THREE.Vector3; // spring displacement caused by the cursor
-  vel: THREE.Vector3;
-  amp: THREE.Vector3;
-  freq: number;
-  phase: number;
-  spin: number;
-  tilt: THREE.Vector3;
+  body: Body;
+  outer: THREE.LineBasicMaterial;
+  inner: THREE.LineBasicMaterial;
 }
 
 function seeded(seed: number) {
@@ -48,8 +62,14 @@ function seeded(seed: number) {
   };
 }
 
-export default function BookScene() {
+export default function BookScene({ variant = 'dark' }: { variant?: SceneVariant }) {
   const hostRef = useRef<HTMLDivElement>(null);
+  // Read through a ref so the animation loop always sees the current theme without
+  // tearing down and rebuilding the scene when it changes.
+  const paletteRef = useRef(PALETTES[variant]);
+  paletteRef.current = PALETTES[variant];
+  const repaintRef = useRef<() => void>(() => {});
+  const booksRef = useRef<Book[]>([]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -67,80 +87,50 @@ export default function BookScene() {
     const reduceMq = window.matchMedia('(prefers-reduced-motion: reduce)');
     let reduced = reduceMq.matches;
     const coarse = window.matchMedia('(pointer: coarse)').matches;
+    // Set while the shelf is parsing a file: the loop stops so pdf.js gets the tab.
+    let busy = isScenePaused();
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 100);
     camera.position.set(0, 0, CAM_Z);
     const tanHalf = Math.tan(THREE.MathUtils.degToRad(FOV / 2));
 
-    const outerMat = new THREE.LineBasicMaterial({ color: 0x8b5cf6, transparent: true, opacity: 0.55, depthWrite: false });
-    const innerMat = new THREE.LineBasicMaterial({ color: 0xc4b5fd, transparent: true, opacity: 0.2, depthWrite: false });
     const geoms: THREE.BufferGeometry[] = [];
-
-    const addEdges = (group: THREE.Group, w: number, h: number, d: number, mat: THREE.Material, x = 0, y = 0, z = 0) => {
-      const box = new THREE.BoxGeometry(w, h, d);
-      const edges = new THREE.EdgesGeometry(box);
-      box.dispose();
-      geoms.push(edges);
-      const line = new THREE.LineSegments(edges, mat);
-      line.position.set(x, y, z);
-      group.add(line);
-      return line;
-    };
-
-    const buildBook = (kind: Kind): THREE.Group => {
-      const group = new THREE.Group();
-      if (kind === 'open') {
-        // Two covers hinged at the spine, opening towards the viewer.
-        const W = 0.9;
-        const H = 1.3;
-        const a = 0.55;
-        for (const s of [-1, 1]) {
-          const page = new THREE.Group();
-          page.position.set(0, 0, 0);
-          page.rotation.y = -s * a;
-          addEdges(page, W, H, 0.05, outerMat, s * (W / 2), 0, 0);
-          addEdges(page, W - 0.06, H - 0.06, 0.02, innerMat, s * (W / 2), 0, 0.01);
-          group.add(page);
-        }
-        return group;
-      }
-      const [w, h, d] = DIMS[kind];
-      addEdges(group, w, h, d, outerMat);
-      // A slightly smaller box suggests the block of pages.
-      addEdges(group, w * 0.92, h * 0.94, d * 0.6, innerMat, 0.03 * w, 0, 0);
-      return group;
-    };
+    const mats: THREE.Material[] = [];
 
     const rand = seeded(7);
     const narrow = host.clientWidth < 700;
-    const count = narrow ? 9 : 15;
-    const bodies: Body[] = [];
+    const count = narrow ? 11 : 18;
+    const bounds: Bounds = { halfX: 8, halfY: 5, minZ: -8, maxZ: 3, margin: 1.8 };
+
+    const books: Book[] = (booksRef.current = []);
     for (let i = 0; i < count; i++) {
-      const kind = KINDS[i % KINDS.length];
-      const group = buildBook(kind);
-      const s = 0.8 + rand() * 0.5;
-      group.scale.setScalar(s);
-      scene.add(group);
-      bodies.push({
-        group,
-        home: new THREE.Vector3(),
-        nx: rand() * 2 - 1,
-        ny: rand() * 2 - 1,
-        z: -7 + rand() * 10,
-        offset: new THREE.Vector3(),
-        vel: new THREE.Vector3(),
-        amp: new THREE.Vector3(0.5 + rand() * 0.6, 0.3 + rand() * 0.4, 0.3 + rand() * 0.5),
-        freq: 0.05 + rand() * 0.07,
-        phase: rand() * Math.PI * 2,
-        spin: (rand() < 0.5 ? -1 : 1) * (0.05 + rand() * 0.15),
-        tilt: new THREE.Vector3(rand() * 0.6 - 0.3, rand() * 0.6 - 0.3, rand() * 0.4 - 0.2),
+      // Each book gets its own materials so depth fade and click flashes can differ.
+      const palette = paletteRef.current;
+      const outer = new THREE.LineBasicMaterial({
+        color: palette.outer,
+        transparent: true,
+        opacity: palette.outerOpacity,
+        depthWrite: false,
       });
+      const inner = new THREE.LineBasicMaterial({
+        color: palette.inner,
+        transparent: true,
+        opacity: palette.innerOpacity,
+        depthWrite: false,
+      });
+      mats.push(outer, inner);
+      const built = buildBook(KINDS[i % KINDS.length], outer, inner);
+      geoms.push(...built.geometries);
+      built.group.scale.setScalar(0.55 + rand() * 0.5);
+      scene.add(built.group);
+      books.push({ group: built.group, body: makeBody(rand, bounds), outer, inner });
     }
 
-    // Pointer position on the z = 0 plane, in scene units. `active` is false while the pointer is off the page.
-    const pointer = { x: 0, y: 0, tx: 0, ty: 0, ndcX: 0, ndcY: 0, active: false };
-    const cam = { x: 0 };
+    // Pointer position on the z = 0 plane, in scene units.
+    const pointer: Pointer = { x: 0, y: 0, active: false };
+    const target = { x: 0, y: 0 };
+    const cam = { x: 0, y: 0, ndcX: 0, ndcY: 0 };
     let halfH = 1;
     let halfW = 1;
 
@@ -153,81 +143,57 @@ export default function BookScene() {
       camera.updateProjectionMatrix();
       halfH = CAM_Z * tanHalf;
       halfW = halfH * camera.aspect;
-      for (const b of bodies) {
-        b.home.set(b.nx * halfW * 1.05, b.ny * halfH * 1.05, b.z);
-      }
+      // Keep the flight volume just outside the frame at any aspect ratio. Books
+      // already outside a shrunken frame are wrapped back in by the next step.
+      bounds.halfX = halfW * 1.15;
+      bounds.halfY = halfH * 1.15;
     };
 
     const toWorld = (clientX: number, clientY: number) => {
       const ndcX = (clientX / window.innerWidth) * 2 - 1;
       const ndcY = -(clientY / window.innerHeight) * 2 + 1;
-      pointer.ndcX = ndcX;
-      pointer.ndcY = ndcY;
-      pointer.tx = ndcX * halfW;
-      pointer.ty = ndcY * halfH;
+      target.x = ndcX * halfW;
+      target.y = ndcY * halfH;
+      cam.ndcX = ndcX;
+      cam.ndcY = ndcY;
       pointer.active = true;
     };
 
     const step = (t: number, dt: number) => {
       const k = 1 - Math.exp(-dt * 8);
-      pointer.x += (pointer.tx - pointer.x) * k;
-      pointer.y += (pointer.ty - pointer.y) * k;
-      cam.x += ((pointer.active ? pointer.ndcX * 0.5 : 0) - cam.x) * k;
-      camera.position.x = cam.x;
-      camera.position.y = pointer.active ? -pointer.ndcY * 0.3 : 0;
-      camera.lookAt(0, 0, 0);
+      pointer.x += (target.x - pointer.x) * k;
+      pointer.y += (target.y - pointer.y) * k;
+      cam.x += ((pointer.active ? cam.ndcX * 0.5 : 0) - cam.x) * k;
+      cam.y += ((pointer.active ? -cam.ndcY * 0.3 : 0) - cam.y) * k;
+      camera.position.set(cam.x, cam.y, CAM_Z);
+      camera.lookAt(cam.x * 0.2, cam.y * 0.2, 0);
 
-      for (const b of bodies) {
-        const f = t * b.freq + b.phase;
-        const tx = b.home.x + Math.sin(f) * b.amp.x;
-        const ty = b.home.y + Math.cos(f * 0.83) * b.amp.y;
-        const tz = b.home.z + Math.sin(f * 0.6 + 1.3) * b.amp.z;
-
-        // Push away from the cursor. Closer books are pushed further and move towards the viewer.
-        let px = 0;
-        let py = 0;
-        let pz = 0;
-        if (pointer.active && !reduced) {
-          const dx = tx + b.offset.x - pointer.x;
-          const dy = ty + b.offset.y - pointer.y;
-          const d = Math.hypot(dx, dy);
-          if (d < REPEL_RADIUS && d > 1e-3) {
-            const s = 1 - d / REPEL_RADIUS;
-            px = (dx / d) * s * 2.2;
-            py = (dy / d) * s * 2.2;
-            pz = s * 1.2;
-          }
+      const live = pointer.active && !coarse && !reduced ? pointer : null;
+      for (const book of books) {
+        const pose = stepBody(book.body, dt, t, live, bounds);
+        book.group.position.set(pose.x, pose.y, pose.z);
+        book.group.rotation.set(pose.rx, pose.ry, pose.rz);
+        // Farther books fade back; a click flash pushes them towards magenta.
+        const palette = paletteRef.current;
+        const fade = depthFade(pose.z, bounds);
+        const glow = pose.glow;
+        book.outer.opacity = (palette.outerOpacity + glow * GLOW_BOOST) * fade;
+        book.inner.opacity = (palette.innerOpacity + glow * GLOW_BOOST * 0.6) * fade;
+        if (glow > 0.001) {
+          flash.setHex(MAGENTA);
+          book.outer.color.setHex(palette.outer).lerp(flash, glow * 0.8);
+        } else if (book.outer.color.getHex() !== palette.outer) {
+          book.outer.color.setHex(palette.outer);
         }
-        // Damped spring, so the books move back smoothly.
-        b.vel.x += (SPRING_K * (px - b.offset.x) - SPRING_D * b.vel.x) * dt;
-        b.vel.y += (SPRING_K * (py - b.offset.y) - SPRING_D * b.vel.y) * dt;
-        b.vel.z += (SPRING_K * (pz - b.offset.z) - SPRING_D * b.vel.z) * dt;
-        b.offset.addScaledVector(b.vel, dt);
-
-        b.group.position.set(tx + b.offset.x, ty + b.offset.y, tz + b.offset.z);
-        b.group.rotation.set(
-          b.tilt.x + Math.sin(f * 0.7) * 0.35 - b.offset.y * 0.2,
-          b.tilt.y + t * b.spin,
-          b.tilt.z - b.offset.x * 0.25,
-        );
       }
       renderer.render(scene, camera);
     };
 
-    // Click impulse: a short shove for books near the pointer.
+    // Click shockwave: books near the pointer are thrown outwards and light up.
     const onPointerDown = (e: PointerEvent) => {
       if (reduced || e.pointerType === 'touch') return;
       toWorld(e.clientX, e.clientY);
-      for (const b of bodies) {
-        const dx = b.group.position.x - pointer.tx;
-        const dy = b.group.position.y - pointer.ty;
-        const d = Math.hypot(dx, dy);
-        if (d < 3.5 && d > 1e-3) {
-          const s = (1 - d / 3.5) * 3;
-          b.vel.x += (dx / d) * s;
-          b.vel.y += (dy / d) * s;
-        }
-      }
+      for (const book of books) shock(book.body, target.x, target.y);
     };
     const onPointerMove = (e: PointerEvent) => {
       if (e.pointerType === 'touch') return;
@@ -239,6 +205,7 @@ export default function BookScene() {
 
     let raf = 0;
     let last = 0;
+    let running = false;
     const start = performance.now();
     const loop = (now: number) => {
       const dt = Math.min((now - last) / 1000, 0.05);
@@ -246,19 +213,28 @@ export default function BookScene() {
       step((now - start) / 1000, dt);
       raf = requestAnimationFrame(loop);
     };
-    const runStill = () => {
+    const stop = () => {
+      if (!running) return;
+      running = false;
       cancelAnimationFrame(raf);
-      pointer.active = false;
-      step(0, 0);
     };
     const runAnimated = () => {
-      cancelAnimationFrame(raf);
+      if (running) return;
+      running = true;
       last = performance.now();
       raf = requestAnimationFrame(loop);
     };
+    const runStill = () => {
+      stop();
+      pointer.active = false;
+      step(0, 0);
+    };
 
     const applyMotion = () => {
-      if (reduced) runStill();
+      // Paused for an import paints one still frame, so the page looks unchanged
+      // while nothing is animating behind it.
+      if (reduced || busy) runStill();
+      else if (document.hidden) stop();
       else runAnimated();
     };
     const onMotionChange = (e: MediaQueryListEvent) => {
@@ -268,32 +244,53 @@ export default function BookScene() {
 
     resize();
     applyMotion();
+    repaintRef.current = () => step(reduced ? 0 : (performance.now() - start) / 1000, 0);
 
     const ro = new ResizeObserver(() => {
       resize();
       if (reduced) step(0, 0);
     });
     ro.observe(host);
+    const unsubscribePause = subscribeScenePause((value) => {
+      busy = value;
+      applyMotion();
+    });
     reduceMq.addEventListener('change', onMotionChange);
+    document.addEventListener('visibilitychange', applyMotion);
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerdown', onPointerDown);
     document.documentElement.addEventListener('pointerleave', onLeave);
     if (coarse) pointer.active = false;
 
     return () => {
-      cancelAnimationFrame(raf);
+      stop();
+      repaintRef.current = () => {};
       ro.disconnect();
+      unsubscribePause();
       reduceMq.removeEventListener('change', onMotionChange);
+      document.removeEventListener('visibilitychange', applyMotion);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerdown', onPointerDown);
       document.documentElement.removeEventListener('pointerleave', onLeave);
       for (const g of geoms) g.dispose();
-      outerMat.dispose();
-      innerMat.dispose();
+      for (const m of mats) m.dispose();
       renderer.dispose();
       renderer.domElement.remove();
     };
   }, []);
+
+  // Recolour in place when the app theme changes, then repaint once so a still
+  // frame (reduced motion) picks it up too.
+  useEffect(() => {
+    const palette = PALETTES[variant];
+    for (const book of booksRef.current) {
+      book.outer.color.setHex(palette.outer);
+      book.outer.opacity = palette.outerOpacity;
+      book.inner.color.setHex(palette.inner);
+      book.inner.opacity = palette.innerOpacity;
+    }
+    repaintRef.current();
+  }, [variant]);
 
   return <div ref={hostRef} className="absolute inset-0 h-full w-full" />;
 }

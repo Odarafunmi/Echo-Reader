@@ -14,6 +14,7 @@ import {
   type ProgressMap,
 } from '@/lib/library';
 import { ACCEPT_ATTR } from '@/lib/parse';
+import { pauseScene, resumeScene } from '@/lib/scene/bus';
 import BookCard from './BookCard';
 import Toast, { type ToastState } from './Toast';
 import ProgressBar from './ProgressBar';
@@ -47,15 +48,24 @@ export default function Shelf() {
     const list = Array.from(files);
     if (list.length === 0) return;
     let added = 0;
-    for (const file of list) {
-      setImporting(file.name);
-      try {
-        const meta = await importFile(file);
-        added++;
-        notify(`Added “${meta.title}” to your shelf`, 'ok');
-      } catch (err) {
-        notify(err instanceof Error ? err.message : `Could not import ${file.name}`, 'error');
+    // Parsing competes with the animating background for this tab's memory and CPU,
+    // so the 3D scene holds its last frame until the work is done. On a phone that
+    // is the difference between a working import and a memory error.
+    pauseScene();
+    try {
+      for (const file of list) {
+        setImporting(file.name);
+        try {
+          const meta = await importFile(file);
+          added++;
+          notify(`Added “${meta.title}” to your shelf`, 'ok');
+        } catch (err) {
+          notify(err instanceof Error ? err.message : `Could not import ${file.name}`, 'error');
+        }
       }
+    } finally {
+      // A failed import must not leave the background frozen.
+      resumeScene();
     }
     setImporting(null);
     if (added > 0) await refresh();

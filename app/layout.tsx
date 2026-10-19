@@ -2,6 +2,9 @@ import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import './globals.css';
 import SceneBackground from '@/components/SceneBackground';
+import { ProfileGate } from '@/lib/profile/useProfile';
+import { ThemeGate } from '@/lib/theme/useTheme';
+import { THEME_SCRIPT } from '@/lib/theme/dom';
 
 export const metadata: Metadata = {
   title: 'Echo Shelf',
@@ -9,14 +12,22 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#0A0A0F',
-  colorScheme: 'dark',
+  themeColor: [
+    { media: '(prefers-color-scheme: dark)', color: '#0A0A0F' },
+    { media: '(prefers-color-scheme: light)', color: '#F7F5F2' },
+  ],
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    // No data-theme prop here on purpose. That attribute is owned by THEME_SCRIPT
+    // and by lib/theme/dom.ts; if React also carried it as a prop it would keep
+    // reasserting its own value and silently undo every toggle.
+    // suppressHydrationWarning covers the one attribute the script adds before
+    // React runs, which is expected and not a real mismatch.
+    <html lang="en" suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
@@ -29,8 +40,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <span className="ambient-blob animate-drift-a -left-40 -top-40 h-[480px] w-[480px] opacity-60" />
           <span className="ambient-blob animate-drift-b -right-40 top-1/3 h-[420px] w-[420px] opacity-50" />
         </div>
-        <SceneBackground />
-        <div className="relative z-10 min-h-screen">{children}</div>
+        <ThemeGate>
+          <SceneBackground />
+          <ProfileGate>
+            <div className="relative z-10 min-h-screen">{children}</div>
+          </ProfileGate>
+        </ThemeGate>
       </body>
     </html>
   );

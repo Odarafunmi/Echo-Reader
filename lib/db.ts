@@ -1,9 +1,23 @@
 // IndexedDB storage for the user's books and annotations. Everything stays in the browser for now;
 // the PRD's Supabase backend will replace this layer later.
-import type { Annotation, BookContent, BookMeta, Summary, VoiceProfile, VoiceSample } from './types';
+import type {
+  Annotation,
+  AppSettings,
+  BookContent,
+  BookMeta,
+  StoredProfile,
+  Summary,
+  VoiceProfile,
+  VoiceSample,
+} from './types';
 
 const DB_NAME = 'echo-shelf';
-const DB_VERSION = 4;
+/**
+ * Bump whenever a store is added. The upgrade handler is idempotent, but a browser
+ * that already opened a given version will not re-run it, so a new store needs a new
+ * number or returning users would find it missing.
+ */
+const DB_VERSION = 6;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -28,6 +42,9 @@ function openDb(): Promise<IDBDatabase> {
           const samples = db.createObjectStore('voice_samples', { keyPath: 'id' });
           samples.createIndex('profileId', 'profileId', { unique: false });
         }
+        // Local profiles and app settings. No credentials: nothing here is secret.
+        if (!db.objectStoreNames.contains('profiles')) db.createObjectStore('profiles', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings', { keyPath: 'id' });
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => {
@@ -215,5 +232,65 @@ export async function putSummary(s: Summary): Promise<void> {
 export async function deleteSummary(id: string): Promise<void> {
   await run(['summaries'], 'readwrite', (tx) => {
     tx.objectStore('summaries').delete(id);
+  });
+}
+
+/* ---------- Local profiles ---------- */
+
+/** Every profile in this browser, most recently used first. */
+export async function listProfiles(): Promise<StoredProfile[]> {
+  const rows = (await run<StoredProfile[]>(['profiles'], 'readonly', (tx) =>
+    tx.objectStore('profiles').getAll(),
+  )) as StoredProfile[] | undefined;
+  return (rows ?? []).sort((a, b) => b.lastUsedAt - a.lastUsedAt || b.createdAt - a.createdAt);
+}
+
+export async function getProfile(id: string): Promise<StoredProfile | undefined> {
+  return (await run<StoredProfile>(['profiles'], 'readonly', (tx) =>
+    tx.objectStore('profiles').get(id),
+  )) as StoredProfile | undefined;
+}
+
+/** Adds a profile, or updates an existing one. Nothing is checked, because nothing is a secret. */
+export async function putProfile(profile: StoredProfile): Promise<void> {
+  await run(['profiles'], 'readwrite', (tx) => {
+    tx.objectStore('profiles').put(profile);
+  });
+}
+
+/** Records that a profile was just picked, so the list orders itself by recency. */
+export async function touchProfile(id: string, lastUsedAt: number): Promise<void> {
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction('profiles', 'readwrite');
+    const store = tx.objectStore('profiles');
+    const req = store.get(id);
+    req.onsuccess = () => {
+      const profile = req.result as StoredProfile | undefined;
+      if (profile) store.put({ ...profile, lastUsedAt });
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error('Transaction aborted'));
+  });
+}
+
+export async function deleteProfile(id: string): Promise<void> {
+  await run(['profiles'], 'readwrite', (tx) => {
+    tx.objectStore('profiles').delete(id);
+  });
+}
+
+/* ---------- App settings ---------- */
+
+export async function getSettings(): Promise<AppSettings | undefined> {
+  return (await run<AppSettings>(['settings'], 'readonly', (tx) =>
+    tx.objectStore('settings').get('app'),
+  )) as AppSettings | undefined;
+}
+
+export async function putSettings(settings: AppSettings): Promise<void> {
+  await run(['settings'], 'readwrite', (tx) => {
+    tx.objectStore('settings').put(settings);
   });
 }
