@@ -17,6 +17,3 @@ next-env.d.ts
 
 # PDF.js worker, copied from node_modules by scripts/copy-pdf-worker.mjs
 /public/pdf.worker.min.mjs
-
-# eSpeak NG data, copied from node_modules/mespeak by scripts/copy-mespeak.mjs
-/public/mespeak/

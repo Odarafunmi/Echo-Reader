@@ -7,15 +7,13 @@
     "build": "next build",
     "start": "next start -H 0.0.0.0 -p 3000",
     "typecheck": "tsc --noEmit",
-    "postinstall": "node scripts/copy-pdf-worker.mjs && node scripts/copy-mespeak.mjs"
+    "postinstall": "node scripts/copy-pdf-worker.mjs"
   },
   "dependencies": {
     "@types/three": "^0.186.0",
     "jszip": "^3.10.2",
-    "kokoro-js": "^1.2.1",
     "lucide-react": "^1.59.0",
     "mammoth": "^1.13.0",
-    "mespeak": "^2.0.2",
     "next": "^16.4.2",
     "pdfjs-dist": "^6.4.299",
     "react": "^19.3.1",

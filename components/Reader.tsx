@@ -19,8 +19,7 @@ import {
 import { ChapterDrawer, SettingsPanel } from './ReaderPanels';
 import NotesPanel, { type NotesTab } from './NotesPanel';
 import SummaryPanel from './SummaryPanel';
-import { useDeviceVoices, useNarrationChoice } from '@/lib/voice/generic';
-import { makeNarrator, readAloud } from '@/lib/voice/narrators';
+import { readAloud, useGenericVoices, useNarrationPreference } from '@/lib/voice/generic';
 import SelectionToolbar, { type ToolbarState } from './SelectionToolbar';
 import Toast, { type ToastState } from './Toast';
 
@@ -59,17 +58,11 @@ export default function Reader({ id }: { id: string }) {
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [toolbar, setToolbar] = useState<ToolbarState | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
-  // Read aloud. The engine and voice are chosen in Voice Studio.
+  // Read aloud with a built-in voice. The voice is chosen in Voice Studio.
   const [reading, setReading] = useState(false);
-  const [readStatus, setReadStatus] = useState<string | null>(null);
   const readStop = useRef<(() => void) | null>(null);
-  const { resolved: voices, supported: deviceSupported } = useDeviceVoices();
-  const { engine, gender } = useNarrationChoice();
-  const narrator = useMemo(
-    () => makeNarrator(engine, gender, voices, deviceSupported),
-    [engine, gender, voices, deviceSupported],
-  );
-  const ttsSupported = deviceSupported || engine !== 'device';
+  const { resolved: voices, supported: ttsSupported } = useGenericVoices();
+  const [narrator] = useNarrationPreference();
   // Reading stops when the chapter changes or the reader closes.
   useEffect(
     () => () => {
@@ -426,39 +419,18 @@ export default function Reader({ id }: { id: string }) {
       readStop.current?.();
       readStop.current = null;
       setReading(false);
-      setReadStatus(null);
       return;
     }
-    if (!narrator) return;
+    if (!voices) return;
     setReading(true);
-    // Loading a model can take a while. Stopping during that time cancels the read.
-    let cancelled = false;
-    readStop.current = () => {
-      cancelled = true;
-    };
-    setReadStatus(narrator.engine === 'device' ? null : 'Loading voice…');
-    narrator
-      .prepare((message) => setReadStatus(message))
-      .then(() => {
-        if (cancelled) return;
-        setReadStatus(null);
-        readStop.current = readAloud(chapter.paragraphs, narrator, {
-          onStart: (i) => document.querySelector<HTMLElement>(`[data-p="${i}"]`)?.scrollIntoView({ block: 'center' }),
-          onDone: (completed) => {
-            readStop.current = null;
-            setReading(false);
-            setReadStatus(null);
-            if (completed) notify('Finished reading this chapter.');
-          },
-        });
-      })
-      .catch(() => {
-        if (cancelled) return;
+    readStop.current = readAloud(chapter.paragraphs, voices[narrator], {
+      onStart: (i) => document.querySelector<HTMLElement>(`[data-p="${i}"]`)?.scrollIntoView({ block: 'center' }),
+      onDone: (completed) => {
         readStop.current = null;
         setReading(false);
-        setReadStatus(null);
-        notify('That voice could not load. Try another engine in Voice Studio.', 'error');
-      });
+        if (completed) notify('Finished reading this chapter.');
+      },
+    });
   }
   const double = prefs.layout === 'double';
   const width = COLUMN_WIDTH[prefs.margin][double ? 'double' : 'single'];
@@ -503,7 +475,7 @@ export default function Reader({ id }: { id: string }) {
             aria-label={reading ? 'Stop reading aloud' : 'Read this chapter aloud'}
             aria-pressed={reading}
             onClick={toggleRead}
-            disabled={!narrator}
+            disabled={!voices}
           >
             {reading ? <Square className="h-4 w-4" strokeWidth={1.75} /> : <Volume2 className="h-4 w-4" strokeWidth={1.75} />}
           </button>
@@ -645,11 +617,6 @@ export default function Reader({ id }: { id: string }) {
         />
       )}
 
-      {readStatus && (
-        <div role="status" aria-live="polite" className="glass fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full px-5 py-3 text-sm text-fg">
-          {readStatus}
-        </div>
-      )}
       <Toast toast={toast} onDone={dismissToast} />
     </div>
   );
