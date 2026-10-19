@@ -124,3 +124,25 @@ export interface Summary {
   source: 'ai' | 'offline';
   createdAt: number;
 }
+
+/**
+ * A local profile in the `profiles` IndexedDB store.
+ *
+ * There is no password and nothing is verified: this records who is using the app
+ * on this device so their shelf and notes have a name against them. Anyone with the
+ * browser can pick any profile, which is the point — see lib/profile/useProfile.tsx.
+ */
+export interface StoredProfile {
+  id: string;
+  name: string;
+  /** A label, not a login. Optional, and never checked against anything. */
+  email: string;
+  createdAt: number;
+  lastUsedAt: number;
+}
+
+/** App-wide settings in the `settings` store, under the key `app`. */
+export interface AppSettings {
+  id: 'app';
+  theme: 'dark' | 'light';
+}

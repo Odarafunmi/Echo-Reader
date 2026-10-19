@@ -125,6 +125,146 @@ export function useNarrationPreference(): [Gender, (g: Gender) => void] {
   return [gender, update];
 }
 
+/** One installed voice on this device, as a row the user can pick. */
+export interface VoiceOption {
+  /** `SpeechSynthesisVoice.voiceURI`, the stable id used to remember the choice. */
+  uri: string;
+  name: string;
+  lang: string;
+  /** True when the voice is installed locally rather than fetched by the browser. */
+  local: boolean;
+  isDefault: boolean;
+  voice: SpeechSynthesisVoice | null;
+}
+
+function toOption(v: SpeechSynthesisVoice): VoiceOption {
+  return {
+    uri: v.voiceURI,
+    name: v.name,
+    lang: v.lang || 'unknown',
+    local: v.localService,
+    isDefault: v.default,
+    voice: v,
+  };
+}
+
+/**
+ * Every voice the device reports, de-duplicated by URI and ordered so the useful
+ * ones come first: the default, then the rest of the user's language, then English,
+ * then everything else alphabetically.
+ */
+export function listVoices(all: SpeechSynthesisVoice[], preferredLang = 'en'): VoiceOption[] {
+  const seen = new Set<string>();
+  const options: VoiceOption[] = [];
+  for (const v of all) {
+    if (!v || !v.voiceURI || seen.has(v.voiceURI)) continue;
+    seen.add(v.voiceURI);
+    options.push(toOption(v));
+  }
+  const norm = (l: string) => l.toLowerCase();
+  const nav = norm(navigator?.language || preferredLang).slice(0, 2);
+  const rank = (o: VoiceOption) => {
+    const l = norm(o.lang).slice(0, 2);
+    if (o.isDefault) return 0;
+    if (l === nav) return 1;
+    if (l === 'en') return 2;
+    return 3;
+  };
+  return options.sort(
+    (a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name) || a.lang.localeCompare(b.lang),
+  );
+}
+
+const URI_KEY = 'echo-shelf:narration-voice-uri';
+
+/** The remembered voice URI, or null to use the gender default. */
+export function getChosenVoiceUri(): string | null {
+  try {
+    return window.localStorage.getItem(URI_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function saveChosenVoiceUri(uri: string | null) {
+  try {
+    if (uri) window.localStorage.setItem(URI_KEY, uri);
+    else window.localStorage.removeItem(URI_KEY);
+  } catch {
+    // Storage unavailable: the choice lasts for this visit only.
+  }
+}
+
+/** Wraps a specific device voice in the shape the reader already speaks aloud with. */
+export function optionToResolved(o: VoiceOption): ResolvedVoice {
+  const gender: Gender = matchesGender(o.name, 'masculine') ? 'masculine' : 'feminine';
+  return { gender, label: o.name, voice: o.voice, pitch: 1, rate: 1, matched: true };
+}
+
+/**
+ * Works out which voice will actually be used: the one the user picked when it is
+ * still installed, otherwise the gender default. An old install stored a gender
+ * rather than a URI, which is read as "keep using the default".
+ */
+export function resolveChosen(
+  options: VoiceOption[],
+  uri: string | null,
+  fallbacks: Record<Gender, ResolvedVoice> | null,
+  legacyGender: Gender = 'feminine',
+): ResolvedVoice | null {
+  if (uri) {
+    const found = options.find((o) => o.uri === uri);
+    if (found) return optionToResolved(found);
+  }
+  return fallbacks ? fallbacks[legacyGender] : null;
+}
+
+/** Everything the voice UI and the reader need, in one place. */
+export function useNarration(): {
+  supported: boolean;
+  loading: boolean;
+  options: VoiceOption[];
+  chosen: ResolvedVoice | null;
+  chosenUri: string | null;
+  choose: (uri: string | null) => void;
+} {
+  const [options, setOptions] = useState<VoiceOption[]>([]);
+  const [fallbacks, setFallbacks] = useState<Record<Gender, ResolvedVoice> | null>(null);
+  const [uri, setUri] = useState<string | null>(null);
+  const [legacy, setLegacy] = useState<Gender>('feminine');
+  const [supported, setSupported] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    setLegacy(getNarrationPreference());
+    setUri(getChosenVoiceUri());
+    if (!speechSupported()) {
+      setSupported(false);
+      setFallbacks(resolveVoices([]));
+      setLoaded(true);
+      return;
+    }
+    const synth = window.speechSynthesis;
+    const update = () => {
+      const all = synth.getVoices();
+      setOptions(listVoices(all));
+      setFallbacks(resolveVoices(all));
+      setLoaded(true);
+    };
+    update();
+    synth.addEventListener('voiceschanged', update);
+    return () => synth.removeEventListener('voiceschanged', update);
+  }, []);
+
+  const choose = (next: string | null) => {
+    setUri(next);
+    saveChosenVoiceUri(next);
+  };
+
+  const chosen = fallbacks ? resolveChosen(options, uri, fallbacks, legacy) : null;
+  return { supported, loading: !loaded, options, chosen, chosenUri: uri, choose };
+}
+
 function utteranceFor(text: string, v: ResolvedVoice): SpeechSynthesisUtterance {
   const u = new SpeechSynthesisUtterance(text);
   if (v.voice) {

@@ -1,5 +1,7 @@
 import Link from 'next/link';
 import { BookOpen } from 'lucide-react';
+import ProfileMenu from './ProfileMenu';
+import ThemeToggle from './ThemeToggle';
 
 export type NavSection = 'library' | 'notes' | 'voice';
 
@@ -37,6 +39,10 @@ export default function TopNav({ current }: { current: NavSection }) {
             );
           })}
         </nav>
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <ProfileMenu />
+        </div>
       </div>
     </header>
   );

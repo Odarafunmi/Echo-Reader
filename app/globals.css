@@ -152,12 +152,108 @@
   border: 1.5px solid var(--color-violet-mist);
   animation: cursor-ripple 700ms var(--ease-soft) forwards;
 }
+/* The slower, wider ring a click leaves behind the ripple. */
+.cursor-echo {
+  position: fixed; left: 0; top: 0; width: 96px; height: 96px; border-radius: 9999px;
+  border: 1px solid rgb(139 92 246 / 0.5);
+  animation: cursor-echo 1100ms var(--ease-soft) forwards;
+}
 @keyframes cursor-ripple { from { scale: 0.3; opacity: 0.9; } to { scale: 2.4; opacity: 0; } }
+@keyframes cursor-echo { from { scale: 0.2; opacity: 0.55; } to { scale: 3; opacity: 0; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .cursor-layer, .cursor-ripple { display: none !important; }
+  .cursor-layer, .cursor-ripple, .cursor-echo { display: none !important; }
   .ambient-blob, .animate-breathe, .animate-drift-a, .animate-drift-b, .animate-ring { animation: none !important; }
   .animate-fade-up, .animate-page-in, .animate-slide-in, .animate-toast { animation-name: fade-only !important; animation-duration: 200ms !important; transform: none !important; }
   .book-card, .book-card:hover { translate: none !important; scale: none !important; }
 }
 @keyframes fade-only { from { opacity: 0; } to { opacity: 1; } }
+
+/* ---------- Light theme ----------
+   Only the semantic tokens change, so every surface that already uses them
+   (bg-ink, text-fg, border-line, card-sheen, glass) follows along. Unlayered, so
+   these win over the @layer components rules they replace. */
+:root[data-theme='light'] {
+  --color-ink: #f7f5f2;
+  --color-card: #ffffff;
+  --color-raised: #efece7;
+  --color-line: #ddd7cf;
+
+  /* Accents darken enough to hold contrast on a pale ground. */
+  --color-violet: #7c3aed;
+  --color-violet-deep: #6d28d9;
+  --color-violet-mist: #6d28d9;
+  --color-magenta: #c026d3;
+  --color-cyan: #0e7490;
+  --color-amber: #b45309;
+  --color-mint: #047857;
+  --color-rose: #be123c;
+
+  --color-fg: #17161d;
+  --color-fg-2: #55536a;
+  --color-fg-3: #83818f;
+
+  --shadow-glow: 0 8px 26px rgba(124, 58, 237, 0.22);
+}
+
+:root[data-theme='light'] body {
+  background-color: var(--color-ink);
+  color: var(--color-fg);
+}
+
+/* Scrollbars, form controls and the browser chrome follow the theme. */
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='light'] .card-sheen {
+  background: linear-gradient(160deg, #ffffff 0%, #f4f1ec 100%);
+  border-color: var(--color-line);
+  box-shadow: 0 1px 2px rgba(23, 22, 29, 0.04);
+}
+
+:root[data-theme='light'] .glass {
+  background: rgb(255 255 255 / 0.72);
+  border-color: var(--color-line);
+}
+
+/* The top bar and panels blur over content, so they need a pale tint of their own. */
+:root[data-theme='light'] .bg-ink\/70 {
+  background-color: rgb(247 245 242 / 0.78);
+}
+:root[data-theme='light'] .bg-ink\/40 {
+  background-color: rgb(255 255 255 / 0.6);
+}
+
+:root[data-theme='light'] .ambient-blob {
+  background: rgb(124 58 237 / 0.16);
+  filter: blur(130px);
+}
+
+/* The primary button keeps white text, so it takes the deeper gradient to stay legible. */
+:root[data-theme='light'] .btn-primary {
+  background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);
+  color: #fff;
+}
+
+:root[data-theme='light'] .cursor-ring {
+  border-color: rgb(109 40 217 / 0.6);
+  background: rgb(124 58 237 / 0.1);
+}
+:root[data-theme='light'] .cursor-ring[data-hover='true'] {
+  border-color: rgb(192 38 211 / 0.85);
+  background: rgb(124 58 237 / 0.18);
+}
+:root[data-theme='light'] .cursor-dot {
+  background: #6d28d9;
+}
+:root[data-theme='light'] .cursor-ripple {
+  border-color: #7c3aed;
+}
+:root[data-theme='light'] .cursor-echo {
+  border-color: rgb(124 58 237 / 0.45);
+}
+
+:root[data-theme='light'] :focus-visible {
+  outline-color: #7c3aed;
+}

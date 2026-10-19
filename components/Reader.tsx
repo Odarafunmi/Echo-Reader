@@ -19,7 +19,7 @@ import {
 import { ChapterDrawer, SettingsPanel } from './ReaderPanels';
 import NotesPanel, { type NotesTab } from './NotesPanel';
 import SummaryPanel from './SummaryPanel';
-import { readAloud, useGenericVoices, useNarrationPreference } from '@/lib/voice/generic';
+import { readAloud, useNarration } from '@/lib/voice/generic';
 import SelectionToolbar, { type ToolbarState } from './SelectionToolbar';
 import Toast, { type ToastState } from './Toast';
 
@@ -61,8 +61,8 @@ export default function Reader({ id }: { id: string }) {
   // Read aloud with a built-in voice. The voice is chosen in Voice Studio.
   const [reading, setReading] = useState(false);
   const readStop = useRef<(() => void) | null>(null);
-  const { resolved: voices, supported: ttsSupported } = useGenericVoices();
-  const [narrator] = useNarrationPreference();
+  // The voice the user picked in Voice Studio, or the device default when they have not.
+  const { chosen: narrator, supported: ttsSupported } = useNarration();
   // Reading stops when the chapter changes or the reader closes.
   useEffect(
     () => () => {
@@ -421,9 +421,9 @@ export default function Reader({ id }: { id: string }) {
       setReading(false);
       return;
     }
-    if (!voices) return;
+    if (!narrator) return;
     setReading(true);
-    readStop.current = readAloud(chapter.paragraphs, voices[narrator], {
+    readStop.current = readAloud(chapter.paragraphs, narrator, {
       onStart: (i) => document.querySelector<HTMLElement>(`[data-p="${i}"]`)?.scrollIntoView({ block: 'center' }),
       onDone: (completed) => {
         readStop.current = null;
@@ -475,7 +475,7 @@ export default function Reader({ id }: { id: string }) {
             aria-label={reading ? 'Stop reading aloud' : 'Read this chapter aloud'}
             aria-pressed={reading}
             onClick={toggleRead}
-            disabled={!voices}
+            disabled={!narrator}
           >
             {reading ? <Square className="h-4 w-4" strokeWidth={1.75} /> : <Volume2 className="h-4 w-4" strokeWidth={1.75} />}
           </button>
@@ -491,7 +491,7 @@ export default function Reader({ id }: { id: string }) {
         </button>
         <span
           aria-hidden
-          className="absolute bottom-0 left-0 h-px w-full origin-left bg-gradient-to-r from-violet to-magenta transition-transform duration-500 ease-soft"
+          className="absolute bottom-0 left-0 h-1 w-full origin-left bg-gradient-to-r from-violet to-magenta transition-transform duration-500 ease-soft"
           style={{ transform: `scaleX(${percent / 100})` }}
         />
       </header>
