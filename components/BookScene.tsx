@@ -14,6 +14,7 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { buildBook, KINDS } from '@/lib/scene/books';
+import { isScenePaused, subscribeScenePause } from '@/lib/scene/bus';
 import {
   depthFade,
   makeBody,
@@ -86,6 +87,8 @@ export default function BookScene({ variant = 'dark' }: { variant?: SceneVariant
     const reduceMq = window.matchMedia('(prefers-reduced-motion: reduce)');
     let reduced = reduceMq.matches;
     const coarse = window.matchMedia('(pointer: coarse)').matches;
+    // Set while the shelf is parsing a file: the loop stops so pdf.js gets the tab.
+    let busy = isScenePaused();
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 100);
@@ -228,7 +231,9 @@ export default function BookScene({ variant = 'dark' }: { variant?: SceneVariant
     };
 
     const applyMotion = () => {
-      if (reduced) runStill();
+      // Paused for an import paints one still frame, so the page looks unchanged
+      // while nothing is animating behind it.
+      if (reduced || busy) runStill();
       else if (document.hidden) stop();
       else runAnimated();
     };
@@ -246,6 +251,10 @@ export default function BookScene({ variant = 'dark' }: { variant?: SceneVariant
       if (reduced) step(0, 0);
     });
     ro.observe(host);
+    const unsubscribePause = subscribeScenePause((value) => {
+      busy = value;
+      applyMotion();
+    });
     reduceMq.addEventListener('change', onMotionChange);
     document.addEventListener('visibilitychange', applyMotion);
     window.addEventListener('pointermove', onPointerMove);
@@ -257,6 +266,7 @@ export default function BookScene({ variant = 'dark' }: { variant?: SceneVariant
       stop();
       repaintRef.current = () => {};
       ro.disconnect();
+      unsubscribePause();
       reduceMq.removeEventListener('change', onMotionChange);
       document.removeEventListener('visibilitychange', applyMotion);
       window.removeEventListener('pointermove', onPointerMove);

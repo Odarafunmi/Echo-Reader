@@ -7,14 +7,15 @@
     "build": "next build",
     "start": "next start -H 0.0.0.0 -p 3000",
     "typecheck": "tsc --noEmit",
-    "check": "npm run check:scene && npm run check:profiles && npm run check:theme && npm run check:theme-toggle && npm run check:voices && npm run check:pdf",
+    "check": "npm run check:scene && npm run check:scene-pause && npm run check:profiles && npm run check:theme && npm run check:theme-toggle && npm run check:voices && npm run check:pdf",
     "check:scene": "node scripts/check-scene-motion.mjs",
     "check:profiles": "node --import ./scripts/register-alias.mjs scripts/check-profiles.mjs",
     "check:theme": "node scripts/check-theme.mjs",
     "check:theme-toggle": "node scripts/check-theme-toggle.mjs",
     "postinstall": "node scripts/copy-pdf-worker.mjs",
-    "check:voices": "node --experimental-strip-types --import ./scripts/alias-loader.mjs scripts/check-voices.mjs",
-    "check:pdf": "node scripts/check-pdf-parse.mjs"
+    "check:voices": "node --experimental-strip-types --import ./scripts/register-alias.mjs scripts/check-voices.mjs",
+    "check:pdf": "node scripts/check-pdf-parse.mjs",
+    "check:scene-pause": "node --experimental-strip-types --import ./scripts/register-alias.mjs scripts/check-scene-pause.mjs"
   },
   "dependencies": {
     "@types/three": "^0.186.0",
