@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import './globals.css';
+import SceneBackground from '@/components/SceneBackground';
 
 export const metadata: Metadata = {
   title: 'Echo Shelf',
@@ -28,6 +29,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <span className="ambient-blob animate-drift-a -left-40 -top-40 h-[480px] w-[480px] opacity-60" />
           <span className="ambient-blob animate-drift-b -right-40 top-1/3 h-[420px] w-[420px] opacity-50" />
         </div>
+        <SceneBackground />
         <div className="relative z-10 min-h-screen">{children}</div>
       </body>
     </html>

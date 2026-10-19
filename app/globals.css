@@ -136,7 +136,26 @@
   }
 }
 
+
+/* Cursor glow (components/CursorGlow.tsx). Only transform and opacity are animated. */
+.cursor-layer { position: fixed; inset: 0; z-index: 60; pointer-events: none; opacity: 0; transition: opacity 300ms var(--ease-soft); }
+.cursor-ring, .cursor-dot { position: fixed; left: 0; top: 0; will-change: transform; }
+.cursor-ring {
+  width: 34px; height: 34px; border-radius: 9999px;
+  border: 1px solid rgb(196 181 253 / 0.7); background: rgb(139 92 246 / 0.08);
+  transition: border-color 250ms var(--ease-soft), background-color 250ms var(--ease-soft);
+}
+.cursor-ring[data-hover="true"] { border-color: rgb(232 121 249 / 0.9); background: rgb(139 92 246 / 0.16); }
+.cursor-dot { width: 5px; height: 5px; border-radius: 9999px; background: var(--color-violet-mist); }
+.cursor-ripple {
+  position: fixed; left: 0; top: 0; width: 56px; height: 56px; border-radius: 9999px;
+  border: 1.5px solid var(--color-violet-mist);
+  animation: cursor-ripple 700ms var(--ease-soft) forwards;
+}
+@keyframes cursor-ripple { from { scale: 0.3; opacity: 0.9; } to { scale: 2.4; opacity: 0; } }
+
 @media (prefers-reduced-motion: reduce) {
+  .cursor-layer, .cursor-ripple { display: none !important; }
   .ambient-blob, .animate-breathe, .animate-drift-a, .animate-drift-b, .animate-ring { animation: none !important; }
   .animate-fade-up, .animate-page-in, .animate-slide-in, .animate-toast { animation-name: fade-only !important; animation-duration: 200ms !important; transform: none !important; }
   .book-card, .book-card:hover { translate: none !important; scale: none !important; }
