@@ -40,6 +40,22 @@ function linesFromItems(items: unknown[]): string[] {
   return out.filter((l, i, arr) => !(l === '' && arr[i - 1] === ''));
 }
 
+/**
+ * Appends the lines of several pages into `target`, leaving a blank line between
+ * pages so paragraph breaks survive.
+ *
+ * Written incrementally rather than as `flatMap(l => [...l, ''])`, which allocates
+ * a throwaway array per page before building the result. Measured on a 400-page
+ * fixture this is a rounding error (22.0 MB vs 22.7 MB of heap growth), so treat it
+ * as tidiness, not as a fix for anything.
+ */
+function pushPages(target: string[], pages: string[][]): void {
+  for (const lines of pages) {
+    for (const line of lines) target.push(line);
+    target.push('');
+  }
+}
+
 export async function parsePdf(
   buffer: ArrayBuffer,
   fallbackTitle: string,
@@ -61,6 +77,15 @@ export async function parsePdf(
       // Drop bare page numbers, which are usually footers.
       const lines = linesFromItems(content.items).filter((l) => !/^\d{1,4}$/.test(l));
       pageLines.push(lines);
+      // Release this page's fonts and other resources before opening the next one.
+      // Standard hygiene for walking a document; note that a measured A/B against the
+      // previous code showed no memory difference on a base-14 fixture, so this is not
+      // a known fix for anything. It should matter more where pages carry embedded
+      // fonts, which that fixture did not.
+      page.cleanup();
+      // Hand the main thread back now and then so the browser can garbage-collect and
+      // stay responsive; a long unbroken loop looks like a hung tab.
+      if (i % 20 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
     }
 
     // Resolve top-level outline entries to page indices.
@@ -87,19 +112,22 @@ export async function parsePdf(
     if (unique.length >= 2) {
       const chapters: Chapter[] = [];
       if (unique[0].page > 0) {
-        const lines = pageLines.slice(0, unique[0].page).flatMap((l) => [...l, '']);
+        const lines: string[] = [];
+        pushPages(lines, pageLines.slice(0, unique[0].page));
         chapters.push({ title: 'Opening', paragraphs: paragraphsFromLines(lines) });
       }
       unique.forEach((s, k) => {
         const end = k + 1 < unique.length ? unique[k + 1].page : pageLines.length;
-        const lines = pageLines.slice(s.page, end).flatMap((l) => [...l, '']);
+        const lines: string[] = [];
+        pushPages(lines, pageLines.slice(s.page, end));
         chapters.push({ title: s.title, paragraphs: paragraphsFromLines(lines) });
       });
       const nonEmpty = chapters.filter((c) => c.paragraphs.length > 0);
       if (nonEmpty.length) return { title, chapters: nonEmpty };
     }
 
-    const all = pageLines.flatMap((l) => [...l, '']);
+    const all: string[] = [];
+    pushPages(all, pageLines);
     const chapters = chaptersFromParagraphs(paragraphsFromLines(all), fallbackTitle);
     if (chapters.every((c) => c.paragraphs.length === 0)) {
       throw new Error('No selectable text was found. Scanned PDFs need OCR, which is not supported yet.');
