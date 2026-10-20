@@ -30,13 +30,17 @@ export default function SelectionToolbar({
   }, [onClose]);
 
   const activeColor = state.mode === 'existing' ? state.color : null;
-  const x = Math.min(Math.max(state.x, 180), (typeof window !== 'undefined' ? window.innerWidth : 1280) - 180);
+  // Keep the pill on screen at any width: half of it, capped, is all the margin a
+  // 320px phone can give it. The clamp order matters, or `min` can undo `max`.
+  const viewport = typeof window !== 'undefined' ? window.innerWidth : 1280;
+  const half = Math.min(170, Math.max(72, (viewport - 16) / 2));
+  const x = Math.min(Math.max(state.x, half), viewport - half);
 
   return (
     <div
       role="toolbar"
       aria-label="Highlight options"
-      className="glass animate-toast fixed z-50 flex -translate-x-1/2 -translate-y-full items-center gap-1 rounded-full px-2 py-1.5 shadow-lg"
+      className="selection-toolbar glass animate-toast fixed z-50 flex -translate-x-1/2 -translate-y-full items-center gap-1 rounded-full px-2 py-1.5 shadow-lg"
       style={{ left: x, top: Math.max(state.y - 10, 72) }}
       onMouseDown={(e) => e.preventDefault()}
     >

@@ -55,7 +55,9 @@ function Field({
         onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}
         className={
-          'h-12 w-full rounded-input border bg-ink/40 px-4 text-fg placeholder:text-fg-3 ' +
+          // 16px text: iOS zooms the page when a focused field is smaller, and the
+          // sign-in screen must fit without zooming.
+          'h-12 w-full rounded-input border bg-ink/40 px-4 text-base text-fg placeholder:text-fg-3 ' +
           'transition-colors duration-250 ease-soft focus:border-violet focus:outline-none ' +
           (error ? 'border-rose/70' : 'border-line')
         }
@@ -114,7 +116,7 @@ function NewProfileFields({
 export default function ProfileForm({ mode }: { mode: ProfileMode }) {
   const creating = mode === 'create';
   const router = useRouter();
-  const { profiles, create, choose } = useProfile();
+  const { profiles, profile: current, create, choose } = useProfile();
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -174,16 +176,16 @@ export default function ProfileForm({ mode }: { mode: ProfileMode }) {
   const showFields = creating || adding || profiles.length === 0;
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 py-16">
-      <Link href="/" className="mb-10 flex items-center gap-2 font-display text-lg font-semibold tracking-tight">
+    <main className="mx-auto flex min-h-[100dvh] w-[90%] max-w-[400px] flex-col justify-center py-10 sm:py-16">
+      <Link href="/" className="mb-6 flex items-center gap-2 font-display text-lg font-semibold tracking-tight sm:mb-10">
         <span className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-violet to-magenta shadow-glow">
           <BookOpen className="h-4 w-4 text-white" strokeWidth={1.75} />
         </span>
         Echo Shelf
       </Link>
 
-      <section className="card-sheen animate-fade-up p-6 sm:p-8">
-        <h1 className="font-display text-3xl font-semibold tracking-tight">
+      <section className="card-sheen animate-fade-up w-full min-w-0 p-5 sm:p-8">
+        <h1 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">
           {creating ? 'Create your profile' : 'Who is reading?'}
         </h1>
         <p className="mt-2 text-sm text-fg-2">
@@ -195,7 +197,7 @@ export default function ProfileForm({ mode }: { mode: ProfileMode }) {
         </p>
 
         {!creating && profiles.length > 0 && (
-          <div className="mt-6 space-y-2">
+          <div className="mt-5 space-y-2 sm:mt-6">
             {profiles.map((p) => (
               <button
                 key={p.id}
@@ -208,7 +210,14 @@ export default function ProfileForm({ mode }: { mode: ProfileMode }) {
                   {p.name.trim().slice(0, 2).toUpperCase()}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium text-fg">{p.name}</span>
+                  <span className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium text-fg">{p.name}</span>
+                    {current?.id === p.id && (
+                      <span className="shrink-0 rounded-full bg-violet/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-mist">
+                        Current
+                      </span>
+                    )}
+                  </span>
                   {p.email && <span className="block truncate text-xs text-fg-3">{p.email}</span>}
                 </span>
                 <ArrowRight className="h-4 w-4 shrink-0 text-fg-3" strokeWidth={1.75} />
@@ -272,7 +281,7 @@ export default function ProfileForm({ mode }: { mode: ProfileMode }) {
         </p>
       </section>
 
-      <p className="mt-6 flex items-start gap-2 text-xs leading-5 text-fg-3">
+      <p className="mt-5 flex items-start gap-2 px-1 text-xs leading-5 text-fg-3 sm:mt-6">
         <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.75} />
         <span>
           No password and no account server. Profiles are stored in this browser on this device, so

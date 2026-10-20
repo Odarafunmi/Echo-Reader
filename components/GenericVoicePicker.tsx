@@ -139,7 +139,7 @@ export default function GenericVoicePicker() {
               ) : null}
             </p>
             {options.length > 6 && (
-              <div className="relative">
+              <div className="relative w-full sm:w-auto">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-3" strokeWidth={1.75} />
                 <input
                   type="search"
@@ -147,7 +147,7 @@ export default function GenericVoicePicker() {
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Filter voices"
                   aria-label="Filter voices"
-                  className="h-10 w-48 rounded-input border border-line bg-ink/40 pl-9 pr-3 text-sm text-fg placeholder:text-fg-3 focus:border-violet focus:outline-none"
+                  className="h-10 w-full rounded-input border border-line bg-ink/40 pl-9 pr-3 text-base text-fg placeholder:text-fg-3 focus:border-violet focus:outline-none sm:w-48 sm:text-sm"
                 />
               </div>
             )}

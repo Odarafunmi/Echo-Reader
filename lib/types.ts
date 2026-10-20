@@ -3,25 +3,51 @@ export type BookFormat = 'txt' | 'md' | 'docx' | 'epub' | 'pdf';
 export interface Chapter {
   title: string;
   paragraphs: string[];
+  /**
+   * PDFs only: the 1-based source page each paragraph came from, in the same
+   * order as `paragraphs`. The reader uses it to draw the page separators.
+   */
+  pageNumbers?: number[];
+}
+
+/**
+ * A book's cover image, stored with the book so the shelf never has to
+ * regenerate it. `page` means it is the rendered first page of the PDF;
+ * `custom` means the solid-colour title cover made when that page was blank.
+ */
+export interface BookCover {
+  /** A small JPEG or PNG data URL. */
+  dataUrl: string;
+  kind: 'page' | 'custom';
 }
 
 /** Lightweight record used for the shelf. Stored in the `meta` IndexedDB store. */
 export interface BookMeta {
   id: string;
+  /** The profile that owns this book. Every read and write is scoped to it. */
+  profileId: string;
   title: string;
   author: string;
   format: BookFormat;
   addedAt: number;
   wordCount: number;
   chapterCount: number;
-  /** Index into the cover gradient palette, chosen at import time. */
-  tint: number;
+  /**
+   * The cover image. Optional in the type only because books imported before
+   * covers existed are still on shelves; `lib/library.ts` fills those in on
+   * first load and saves the result.
+   */
+  cover?: BookCover;
+  /** Index into the solid cover palette, so a card can draw the colour without the image. */
+  coverColor?: number;
 }
 
 /** Full parsed text. Stored separately so the shelf never loads whole books. */
 export interface BookContent {
   id: string;
   chapters: Chapter[];
+  /** Source pages, when the format has them (PDF). */
+  pageCount?: number;
 }
 
 /** A book with its full text, used by the reader. */
@@ -92,7 +118,8 @@ export type Annotation = Highlight | Bookmark | Note;
 
 /** The user's voice profile. MVP keeps exactly one, with id `me`. */
 export interface VoiceProfile {
-  id: 'me';
+  /** The id of the profile that owns this voice. One voice per profile. */
+  id: string;
   name: string;
   consentAt: number;
   consentVersion: number;
@@ -106,7 +133,8 @@ export type VoiceSampleKind = 'script' | 'verify';
 /** One recorded clip. The audio blob lives in IndexedDB, not in localStorage. */
 export interface VoiceSample {
   id: string;
-  profileId: 'me';
+  /** The owning profile. Recordings are never shared between profiles. */
+  profileId: string;
   kind: VoiceSampleKind;
   label: string;
   seconds: number;

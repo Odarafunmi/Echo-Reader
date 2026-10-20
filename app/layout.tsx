@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import './globals.css';
 import SceneBackground from '@/components/SceneBackground';
+import ServiceWorker from '@/components/ServiceWorker';
 import { ProfileGate } from '@/lib/profile/useProfile';
 import { ThemeGate } from '@/lib/theme/useTheme';
 import { THEME_SCRIPT } from '@/lib/theme/dom';
@@ -9,9 +10,26 @@ import { THEME_SCRIPT } from '@/lib/theme/dom';
 export const metadata: Metadata = {
   title: 'Echo Shelf',
   description: 'Your books. Your way. Read in your own voice.',
+  applicationName: 'Echo Shelf',
+  appleWebApp: {
+    capable: true,
+    title: 'Echo Shelf',
+    statusBarStyle: 'black-translucent',
+  },
+  formatDetection: { telephone: false },
+  icons: {
+    icon: [
+      { url: '/icons/icon.svg', type: 'image/svg+xml' },
+      { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+    ],
+    apple: [{ url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' }],
+  },
 };
 
 export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
   themeColor: [
     { media: '(prefers-color-scheme: dark)', color: '#0A0A0F' },
     { media: '(prefers-color-scheme: light)', color: '#F7F5F2' },
@@ -42,6 +60,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         </div>
         <ThemeGate>
           <SceneBackground />
+          <ServiceWorker />
           <ProfileGate>
             <div className="relative z-10 min-h-screen">{children}</div>
           </ProfileGate>

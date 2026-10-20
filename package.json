@@ -7,17 +7,23 @@
     "build": "next build",
     "start": "next start -H 0.0.0.0 -p 3000",
     "typecheck": "tsc --noEmit",
-    "check": "npm run check:scene && npm run check:scene-pause && npm run check:profiles && npm run check:theme && npm run check:theme-toggle && npm run check:voices && npm run check:pdf",
+    "check": "npm run check:scene && npm run check:scene-pause && npm run check:profiles && npm run check:theme && npm run check:theme-toggle && npm run check:voices && npm run check:pdf && npm run check:scan && npm run check:covers && npm run check:audio && npm run check:engine && npm run check:reader",
     "check:scene": "node scripts/check-scene-motion.mjs",
     "check:profiles": "node --import ./scripts/register-alias.mjs scripts/check-profiles.mjs",
     "check:theme": "node scripts/check-theme.mjs",
     "check:theme-toggle": "node scripts/check-theme-toggle.mjs",
-    "postinstall": "node scripts/copy-pdf-worker.mjs",
+    "postinstall": "node scripts/copy-pdf-worker.mjs && node scripts/copy-ocr-assets.mjs",
     "check:voices": "node --experimental-strip-types --import ./scripts/register-alias.mjs scripts/check-voices.mjs",
     "check:pdf": "node scripts/check-pdf-parse.mjs",
-    "check:scene-pause": "node --experimental-strip-types --import ./scripts/register-alias.mjs scripts/check-scene-pause.mjs"
+    "check:scene-pause": "node --experimental-strip-types --import ./scripts/register-alias.mjs scripts/check-scene-pause.mjs",
+    "check:covers": "node --experimental-strip-types --import ./scripts/register-alias.mjs scripts/check-covers.mjs",
+    "check:audio": "node --experimental-strip-types --import ./scripts/register-alias.mjs scripts/check-audio.mjs",
+    "check:reader": "node scripts/check-reader.mjs",
+    "check:scan": "node scripts/check-scan.mjs",
+    "check:engine": "node scripts/check-engine.mjs"
   },
   "dependencies": {
+    "@tesseract.js-data/eng": "^1.0.0",
     "@types/three": "^0.186.0",
     "jszip": "^3.10.2",
     "lucide-react": "^1.59.0",
@@ -26,6 +32,7 @@
     "pdfjs-dist": "^6.4.299",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "tesseract.js": "^7.0.0",
     "three": "^0.186.1"
   },
   "devDependencies": {

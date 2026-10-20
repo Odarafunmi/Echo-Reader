@@ -104,7 +104,13 @@ Reference: a dark book-reading app UI with glowing accents, soft cards, pill nav
 - On mobile, a floating bottom bar with Home, Search, Library, Notes and Profile. The active icon glows violet.
 
 **Book card (Continue Reading)**
-- Cover, title and a thin violet progress bar with a percentage. Vary cover tints using the supporting accents.
+- Cover, title and a thin violet progress bar with a percentage.
+- A cover is always a real image, never a gradient placeholder. It is the PDF's first page when that page has content; otherwise a solid title cover (below).
+
+**Covers (solid colour palette)**
+- Eight deep colours, all dark enough for white text at 7:1 or better: Midnight Navy `#1E3A5F`, Wine `#5B2333`, Forest `#21503F`, Indigo `#3A2A66`, Chestnut `#6B3F1F`, Deep Teal `#0F5257`, Plum `#4B2142`, Slate `#2F3E4E`.
+- A custom cover is flat colour, a hairline inset frame, the title in bold Fraunces (white, centred, up to six lines), the author beneath in italic Georgia, and a small letterspaced "ECHO SHELF" at the foot. No gradients.
+- Colour choice balances the shelf: a new book takes the palette colour used least often, so five uploads look like five different books.
 
 **Buttons**
 - Primary: violet gradient, white text, pill shape, violet glow.
@@ -112,7 +118,8 @@ Reference: a dark book-reading app UI with glowing accents, soft cards, pill nav
 - Icon buttons: 44px circles on Night Card.
 
 **Audio player (the signature component)**
-- Floating glass bar. Large violet Play, a draggable progress line with a glowing knob, time stamps, speed, skip 15s and a voice chip showing "My Voice".
+- Floating glass bar, pinned above the bottom safe area. Large violet Play/Pause with a true play and pause icon, back 10s and forward 10s, a draggable position line with a glowing knob, elapsed and total time, a 1×/1.25×/1.5×/2× speed menu, a follow-the-voice toggle, and a close button.
+- On a phone it stays one compact row above the text and never wider than the screen.
 
 **Chapter list**
 - Rows with a status icon (mint check for done, lock or dot for upcoming), chapter title and duration. Each row has two small buttons: Summary (cyan) and Listen (violet).
@@ -122,6 +129,12 @@ Reference: a dark book-reading app UI with glowing accents, soft cards, pill nav
 
 **Notes panel**
 - Side drawer with note cards tagged by page. Magenta accent for notes, amber for highlights.
+
+**Reader page breaks**
+- Inside a PDF chapter, each change of source page gets a quiet divider: a 1px hairline at 14% of the text colour either side of a small uppercase "Page 3" label at 42%. Nothing heavier; the text stays the loudest thing on the screen.
+
+**Floating chapter arrows**
+- 46px circles (40px on desktop) fixed at mid-height, 1px border, glass fill, 55% opacity that goes to 100% on hover or focus. Hidden entirely at the first and last chapter.
 
 **Voice Studio**
 - A centred record button with a pulsing violet ring, a live waveform while recording, and a guided script to read aloud.
@@ -151,7 +164,7 @@ Principle: **subtle, smooth, professional.** Fast enough to feel responsive, slo
 | **Book cards** | On hover, lift 6px, scale 1.02, border turns violet and a soft glow appears. |
 | **Play button** | Gentle breathing glow (3s loop) while idle. On press, scales to 0.94. |
 | **Audio playing** | A waveform of thin violet bars moves in time with the audio. |
-| **Text sync (narration)** | The sentence being read gets a violet underline or soft background that glides to the next sentence. |
+| **Text sync (narration)** | The exact word being spoken gets a soft amber background at 30% (`rgb(251 191 36 / .3)`) with a 1px amber halo and 3px rounding; it moves word by word and only one word carries it. |
 | **Tabs and pills** | The active pill background slides between tabs instead of jumping. |
 | **Progress bars and rings** | Animate from 0 to value on first view (700ms ease-out). |
 | **Panels (Summary, Notes)** | Slide in from the right with a fade and a blurred backdrop. |
@@ -173,6 +186,7 @@ Principle: **subtle, smooth, professional.** Fast enough to feel responsive, slo
 - **Animation library:** Framer Motion for layout, stagger and shared-element transitions. CSS keyframes for the ambient glow and breathing Play button.
 - **Icons:** Lucide, 1.75px stroke, rounded caps.
 - **Accessibility:** keep text contrast at WCAG AA or better (Electric Violet on Ink Black passes for large text and UI elements; use Lavender Mist for small violet text).
+- **Mobile:** the layout must fit a 320px screen with no horizontal scrolling. The three top tabs stay on one line (short labels below `sm`, `flex-1`, `whitespace-nowrap`), the sign-in card is a 400px maximum fluid column, and fixed-width panels use `min(…, 100%)`.
 
 ---
 

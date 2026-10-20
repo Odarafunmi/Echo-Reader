@@ -1,11 +1,33 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
-import { ArrowLeft, Bookmark as BookmarkIcon, BookmarkCheck, ChevronLeft, ChevronRight, List, NotebookPen, Sparkles, Square, Type, Volume2 } from 'lucide-react';
-import { HIGHLIGHT_COLORS, selectionInfo, splitByHighlights } from '@/lib/annotations';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
+import {
+  ArrowLeft,
+  Bookmark as BookmarkIcon,
+  BookmarkCheck,
+  ChevronLeft,
+  ChevronRight,
+  List,
+  NotebookPen,
+  Pause,
+  Sparkles,
+  Type,
+  Volume2,
+} from 'lucide-react';
+import { selectionInfo } from '@/lib/annotations';
 import { deleteAnnotation, listAnnotations, putAnnotation } from '@/lib/db';
-import type { Annotation, Book, Bookmark, Highlight, HighlightColor, Note, ReaderPrefs } from '@/lib/types';
+import type { Annotation, Book, Bookmark, Chapter, Highlight, HighlightColor, Note, ReaderPrefs } from '@/lib/types';
 import {
   DEFAULT_PREFS,
   getPrefs,
@@ -16,19 +38,18 @@ import {
   savePrefs,
   saveProgress,
 } from '@/lib/library';
+import { buildChapterAudio, type ChapterAudio, type WordToken } from '@/lib/audio/text';
+import { NarrationEngine, SPEEDS, type Speed } from '@/lib/audio/engine';
+import { reacquireWakeLock } from '@/lib/audio/background';
+import { useNarration, type ResolvedVoice } from '@/lib/voice/generic';
+import { useProfile } from '@/lib/profile/useProfile';
 import { ChapterDrawer, SettingsPanel } from './ReaderPanels';
 import NotesPanel, { type NotesTab } from './NotesPanel';
 import SummaryPanel from './SummaryPanel';
-import { readAloud, useNarration } from '@/lib/voice/generic';
+import ChapterText from './ChapterText';
+import AudioPlayer from './AudioPlayer';
 import SelectionToolbar, { type ToolbarState } from './SelectionToolbar';
 import Toast, { type ToastState } from './Toast';
-
-const FONT_FAMILY: Record<ReaderPrefs['font'], string> = {
-  literata: 'var(--font-reader-literata)',
-  inter: 'var(--font-reader-inter)',
-  georgia: 'var(--font-reader-georgia)',
-  dyslexic: 'var(--font-reader-dyslexic)',
-};
 
 // "Margins" control the measure: wider margins mean a narrower text column.
 const COLUMN_WIDTH: Record<ReaderPrefs['margin'], { single: number; double: number }> = {
@@ -36,6 +57,27 @@ const COLUMN_WIDTH: Record<ReaderPrefs['margin'], { single: number; double: numb
   medium: { single: 640, double: 1040 },
   wide: { single: 540, double: 900 },
 };
+
+const SPEED_KEY = 'echo-shelf:narration-speed';
+
+/** Used until the device reports its voices, so the first tap still speaks. */
+const DEVICE_VOICE: ResolvedVoice = {
+  gender: 'feminine',
+  label: 'Device voice',
+  voice: null,
+  pitch: 1,
+  rate: 1,
+  matched: false,
+};
+
+function savedSpeed(): Speed {
+  try {
+    const raw = Number(localStorage.getItem(SPEED_KEY));
+    return (SPEEDS as number[]).includes(raw) ? (raw as Speed) : 1;
+  } catch {
+    return 1;
+  }
+}
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 const newId = () => crypto.randomUUID();
@@ -47,6 +89,9 @@ interface Jump {
 }
 
 export default function Reader({ id }: { id: string }) {
+  const { profile } = useProfile();
+  const profileId = profile?.id ?? null;
+
   const [book, setBook] = useState<Book | null | undefined>(undefined);
   const [prefs, setPrefs] = useState<ReaderPrefs>(DEFAULT_PREFS);
   const [chapterIndex, setChapterIndex] = useState(0);
@@ -58,19 +103,22 @@ export default function Reader({ id }: { id: string }) {
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [toolbar, setToolbar] = useState<ToolbarState | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
-  // Read aloud with a built-in voice. The voice is chosen in Voice Studio.
-  const [reading, setReading] = useState(false);
-  const readStop = useRef<(() => void) | null>(null);
-  // The voice the user picked in Voice Studio, or the device default when they have not.
+
+  // Narration.
   const { chosen: narrator, supported: ttsSupported } = useNarration();
-  // Reading stops when the chapter changes or the reader closes.
-  useEffect(
-    () => () => {
-      readStop.current?.();
-      readStop.current = null;
-    },
-    [chapterIndex],
-  );
+  const [reading, setReading] = useState(false);
+  const [wordIndex, setWordIndex] = useState(0);
+  const [speed, setSpeed] = useState<Speed>(1);
+  const [follow, setFollow] = useState(true);
+  const [audioStarted, setAudioStarted] = useState(false);
+  const engineRef = useRef<NarrationEngine | null>(null);
+  const wordIndexRef = useRef(0);
+  const followRef = useRef(true);
+  const activeWordEl = useRef<HTMLElement | null>(null);
+  const lastUserScroll = useRef(0);
+  const suppressClick = useRef(false);
+  /** A single click on a highlighted word, held back in case a double-click follows. */
+  const pendingWordClick = useRef<number | undefined>(undefined);
 
   // Refs mirror state for event handlers and cleanup, so they never see stale values.
   const chapterRef = useRef(0);
@@ -83,18 +131,25 @@ export default function Reader({ id }: { id: string }) {
   }, []);
   const dismissToast = useCallback(() => setToast(null), []);
 
-  // Load the book, its saved position, and its annotations.
+  useEffect(() => {
+    followRef.current = follow;
+  }, [follow]);
+
+  // Load the book, its saved position, and its annotations. Scoped to this profile:
+  // a book owned by someone else reads as not found.
   useEffect(() => {
     setPrefs(getPrefs());
+    setSpeed(savedSpeed());
+    if (!profileId) return;
     let alive = true;
-    loadBook(id)
+    loadBook(id, profileId)
       .then(async (b) => {
         if (!alive) return;
         setBook(b);
         if (!b) return;
         if (new URLSearchParams(window.location.search).get('panel') === 'summary') setPanel('summary');
         const queued = takeJump(id);
-        const saved = getProgressMap()[id];
+        const saved = getProgressMap(profileId)[id];
         const start = queued
           ? clamp(queued.chapter, 0, b.chapters.length - 1)
           : saved
@@ -113,7 +168,209 @@ export default function Reader({ id }: { id: string }) {
     return () => {
       alive = false;
     };
-  }, [id]);
+  }, [id, profileId]);
+
+  const chapter: Chapter | undefined = book?.chapters[clamp(chapterIndex, 0, Math.max(0, (book?.chapters.length ?? 1) - 1))];
+  const ci = book ? clamp(chapterIndex, 0, book.chapters.length - 1) : 0;
+
+  // The chapter's spoken model. Rebuilt only when the chapter itself changes.
+  const audio = useMemo<ChapterAudio | null>(() => (chapter ? buildChapterAudio(chapter) : null), [chapter]);
+
+  const wordsByParagraph = useMemo(() => {
+    const map = new Map<number, WordToken[]>();
+    if (!audio) return map;
+    for (const word of audio.words) {
+      const list = map.get(word.paragraph);
+      if (list) list.push(word);
+      else map.set(word.paragraph, [word]);
+    }
+    return map;
+  }, [audio]);
+
+  const marksByParagraph = useMemo(() => {
+    const map = new Map<number, Highlight[]>();
+    for (const a of annotations) {
+      if (a.kind !== 'highlight' || a.chapter !== ci) continue;
+      map.set(a.paragraph, [...(map.get(a.paragraph) ?? []), a]);
+    }
+    return map;
+  }, [annotations, ci]);
+
+  /* ---------- Narration plumbing ---------- */
+
+  /** Paints the highlight on one word, moving it off the previous one. */
+  const paintWord = useCallback((index: number, forceScroll = false) => {
+    const root = articleRef.current;
+    if (!root) return;
+    const el = root.querySelector<HTMLElement>(`[data-w="${index}"]`);
+    if (!el) return;
+    if (activeWordEl.current !== el) {
+      activeWordEl.current?.classList.remove('word-active');
+      el.classList.add('word-active');
+      activeWordEl.current = el;
+    }
+    if (!followRef.current && !forceScroll) return;
+    if (!forceScroll && performance.now() - lastUserScroll.current < 4000) return;
+    const rect = el.getBoundingClientRect();
+    const topLimit = 96;
+    const bottomLimit = window.innerHeight - (window.innerWidth < 640 ? 220 : 180);
+    if (rect.top < topLimit || rect.bottom > bottomLimit) {
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }, []);
+
+  const disposeEngine = useCallback(() => {
+    engineRef.current?.dispose();
+    engineRef.current = null;
+    activeWordEl.current?.classList.remove('word-active');
+    activeWordEl.current = null;
+    setReading(false);
+    setAudioStarted(false);
+  }, []);
+
+  useEffect(() => () => {
+    window.clearTimeout(pendingWordClick.current);
+    disposeEngine();
+  }, [disposeEngine]);
+
+  /** The first word of the first paragraph in view, for the header's play button. */
+  const firstVisibleWord = useCallback((): number => {
+    const root = articleRef.current;
+    if (!root) return 0;
+    const paragraphs = root.querySelectorAll<HTMLElement>('[data-p]');
+    for (const paragraph of paragraphs) {
+      const rect = paragraph.getBoundingClientRect();
+      if (rect.bottom > 120) {
+        const word = paragraph.querySelector<HTMLElement>('[data-w]');
+        if (word) return Number(word.dataset.w);
+      }
+    }
+    return 0;
+  }, []);
+
+  const ensureEngine = useCallback(
+    (startWord: number): NarrationEngine | null => {
+      if (!audio || !chapter || !book) return null;
+      if (engineRef.current) return engineRef.current;
+      const engine = new NarrationEngine({
+        audio,
+        voice: narrator ?? DEVICE_VOICE,
+        speed,
+        startWord,
+        bookTitle: book.title,
+        chapterTitle: chapter.title,
+        artwork: book.cover?.dataUrl,
+        onWord: (index) => {
+          wordIndexRef.current = index;
+          setWordIndex(index);
+          paintWord(index);
+        },
+        onState: (state) => {
+          setReading(state.playing);
+          setSpeed(state.speed);
+        },
+        onFinish: () => notify('Finished this chapter. Tap a word to keep going.'),
+        onError: (message) => notify(message, 'error'),
+      });
+      engineRef.current = engine;
+      setAudioStarted(true);
+      setWordIndex(startWord);
+      wordIndexRef.current = startWord;
+      return engine;
+    },
+    [audio, chapter, narrator, book, speed, paintWord, notify],
+  );
+
+  const startFromWord = useCallback(
+    (index: number) => {
+      if (!ttsSupported) {
+        notify('This browser cannot read text aloud. Try Chrome, Edge or Safari.', 'error');
+        return;
+      }
+      const engine = ensureEngine(index);
+      engine?.play(index);
+    },
+    [ttsSupported, narrator, ensureEngine, notify],
+  );
+
+  function toggleRead() {
+    if (!ttsSupported) {
+      notify('This browser cannot read text aloud. Try Chrome, Edge or Safari.', 'error');
+      return;
+    }
+    if (engineRef.current) {
+      engineRef.current.toggle();
+      return;
+    }
+    startFromWord(firstVisibleWord());
+  }
+
+  const seekWord = useCallback((index: number) => {
+    engineRef.current?.seekToWord(index);
+    wordIndexRef.current = index;
+    setWordIndex(index);
+    paintWord(index, true);
+  }, [paintWord]);
+
+  const changeSpeed = useCallback((next: Speed) => {
+    setSpeed(next);
+    engineRef.current?.setSpeed(next);
+    try {
+      localStorage.setItem(SPEED_KEY, String(next));
+    } catch {
+      // Storage blocked; the speed lasts for this visit.
+    }
+  }, []);
+
+  // Re-paint the active word after the text re-renders (a settings change, say).
+  useLayoutEffect(() => {
+    if (audioStarted) paintWord(wordIndexRef.current, true);
+  }, [audioStarted, prefs, marksByParagraph, paintWord]);
+
+  // Following the voice stops for a moment when the reader scrolls by hand.
+  useEffect(() => {
+    const mark = () => {
+      lastUserScroll.current = performance.now();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (['PageDown', 'PageUp', 'Home', 'End', 'ArrowDown', 'ArrowUp', ' '].includes(e.key)) mark();
+    };
+    window.addEventListener('wheel', mark, { passive: true });
+    window.addEventListener('touchmove', mark, { passive: true });
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('wheel', mark);
+      window.removeEventListener('touchmove', mark);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, []);
+
+  // Coming back from a locked screen: sync the highlight, take the wake lock again,
+  // and restart the voice if the browser suspended it while the screen was off.
+  useEffect(() => {
+    let timer: number | undefined;
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      const engine = engineRef.current;
+      if (!engine?.isPlaying) return;
+      void reacquireWakeLock();
+      paintWord(wordIndexRef.current, true);
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => engine.resync(), 500);
+    };
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      paintWord(wordIndexRef.current, true);
+      engineRef.current?.resync();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('pageshow', onPageShow);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('pageshow', onPageShow);
+    };
+  }, [paintWord]);
 
   // Restore the scroll position (or jump to a paragraph) after a chapter is rendered.
   useLayoutEffect(() => {
@@ -132,9 +389,9 @@ export default function Reader({ id }: { id: string }) {
     window.scrollTo({ top: target?.ratio ? target.ratio * Math.max(0, max) : 0, behavior: 'auto' });
   }, [book, chapterIndex, navCount]);
 
-  // Track scroll position and save progress.
+  // Track scroll position and save progress, per profile.
   useEffect(() => {
-    if (!book) return;
+    if (!book || !profileId) return;
     let frame = 0;
     let timer: number | undefined;
     const onScroll = () => {
@@ -147,7 +404,7 @@ export default function Reader({ id }: { id: string }) {
         setToolbar((t) => (t?.mode === 'new' ? null : t));
         window.clearTimeout(timer);
         timer = window.setTimeout(
-          () => saveProgress(id, { chapter: chapterRef.current, ratio: r, updatedAt: Date.now() }),
+          () => saveProgress(profileId, id, { chapter: chapterRef.current, ratio: r, updatedAt: Date.now() }),
           400,
         );
       });
@@ -157,15 +414,20 @@ export default function Reader({ id }: { id: string }) {
       window.removeEventListener('scroll', onScroll);
       cancelAnimationFrame(frame);
       window.clearTimeout(timer);
-      saveProgress(id, { chapter: chapterRef.current, ratio: ratioRef.current, updatedAt: Date.now() });
+      saveProgress(profileId, id, { chapter: chapterRef.current, ratio: ratioRef.current, updatedAt: Date.now() });
     };
-  }, [book, id]);
+  }, [book, id, profileId]);
 
   const goTo = useCallback(
     (n: number, jump: Jump = {}) => {
       if (!book) return;
       const next = clamp(n, 0, book.chapters.length - 1);
+      if (next === chapterRef.current && Object.keys(jump).length === 0) return;
       const startRatio = jump.ratio ?? 0;
+      engineRef.current?.dispose();
+      engineRef.current = null;
+      setReading(false);
+      setAudioStarted(false);
       chapterRef.current = next;
       ratioRef.current = startRatio;
       pendingScroll.current = jump;
@@ -174,9 +436,9 @@ export default function Reader({ id }: { id: string }) {
       setNavCount((c) => c + 1);
       setPanel(null);
       setToolbar(null);
-      saveProgress(id, { chapter: next, ratio: startRatio, updatedAt: Date.now() });
+      if (profileId) saveProgress(profileId, id, { chapter: next, ratio: startRatio, updatedAt: Date.now() });
     },
-    [book, id],
+    [book, id, profileId],
   );
 
   // Left and right arrows change chapter when no field has focus.
@@ -240,6 +502,7 @@ export default function Reader({ id }: { id: string }) {
   );
 
   function handleSelectionEnd() {
+    if (suppressClick.current) return;
     window.setTimeout(() => {
       const sel = window.getSelection();
       const root = articleRef.current;
@@ -265,13 +528,73 @@ export default function Reader({ id }: { id: string }) {
     }, 0);
   }
 
-  function handleArticleClick(e: ReactMouseEvent<HTMLElement>) {
-    const mark = (e.target as HTMLElement).closest<HTMLElement>('mark[data-h]');
-    if (!mark || !book) return;
-    const h = annotations.find((a): a is Highlight => a.kind === 'highlight' && a.id === mark.dataset.h);
+  /** Opens the colour/note editor for a highlight that was double-clicked or held. */
+  function openHighlightToolbar(highlightId: string, rect: DOMRect) {
+    const h = annotations.find((a): a is Highlight => a.kind === 'highlight' && a.id === highlightId);
     if (!h) return;
-    const rect = mark.getBoundingClientRect();
     setToolbar({ mode: 'existing', x: rect.left + rect.width / 2, y: rect.top, highlightId: h.id, color: h.color });
+  }
+
+  function handleDoubleClick(e: ReactMouseEvent<HTMLElement>) {
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-h]');
+    if (!el?.dataset.h) return;
+    e.preventDefault();
+    // Cancel the delayed single-click, so editing a highlight does not begin
+    // reading the chapter as a side effect.
+    window.clearTimeout(pendingWordClick.current);
+    pendingWordClick.current = undefined;
+    openHighlightToolbar(el.dataset.h, el.getBoundingClientRect());
+  }
+
+  function handlePointerDown(e: ReactPointerEvent<HTMLElement>) {
+    if (e.pointerType !== 'touch') return;
+    const target = (e.target as HTMLElement).closest<HTMLElement>('[data-h]');
+    if (!target?.dataset.h) return;
+    const id = target.dataset.h;
+    suppressClick.current = false;
+    const timer = window.setTimeout(() => {
+      suppressClick.current = true;
+      openHighlightToolbar(id, target.getBoundingClientRect());
+      if ('vibrate' in navigator) navigator.vibrate?.(10);
+    }, 550);
+    const cancel = () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('pointerup', cancel);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('pointermove', moved);
+    };
+    const moved = (ev: PointerEvent) => {
+      if (Math.abs(ev.clientX - e.clientX) > 8 || Math.abs(ev.clientY - e.clientY) > 8) cancel();
+    };
+    window.addEventListener('pointerup', cancel);
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('pointermove', moved);
+  }
+
+  function handleArticleClick(e: ReactMouseEvent<HTMLElement>) {
+    if (suppressClick.current) {
+      suppressClick.current = false;
+      return;
+    }
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return;
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-w]');
+    if (!el?.dataset.w) return;
+    setToolbar(null);
+    const index = Number(el.dataset.w);
+    // A highlighted word also answers a double-click (edit the highlight) or a
+    // long-press (edit it on a phone), so its single click waits a moment to see
+    // whether a second one is coming. Plain words start at once: no lag.
+    if (el.dataset.h) {
+      if (e.detail > 1) return;
+      window.clearTimeout(pendingWordClick.current);
+      pendingWordClick.current = window.setTimeout(() => {
+        pendingWordClick.current = undefined;
+        startFromWord(index);
+      }, 240);
+      return;
+    }
+    startFromWord(index);
   }
 
   async function createHighlight(t: Extract<ToolbarState, { mode: 'new' }>, color: HighlightColor): Promise<Highlight> {
@@ -348,9 +671,7 @@ export default function Reader({ id }: { id: string }) {
     () => annotations.filter((a): a is Bookmark => a.kind === 'bookmark'),
     [annotations],
   );
-  const currentBookmark = bookmarks.find(
-    (b) => b.chapter === chapterIndex && Math.abs(b.ratio - ratio) < 0.03,
-  );
+  const currentBookmark = bookmarks.find((b) => b.chapter === chapterIndex && Math.abs(b.ratio - ratio) < 0.03);
 
   async function toggleBookmark() {
     if (!book) return;
@@ -375,17 +696,6 @@ export default function Reader({ id }: { id: string }) {
     }
   }
 
-  const highlightsByChapter = useMemo(() => {
-    const map = new Map<number, Map<number, Highlight[]>>();
-    for (const a of annotations) {
-      if (a.kind !== 'highlight') continue;
-      const byPara = map.get(a.chapter) ?? new Map<number, Highlight[]>();
-      byPara.set(a.paragraph, [...(byPara.get(a.paragraph) ?? []), a]);
-      map.set(a.chapter, byPara);
-    }
-    return map;
-  }, [annotations]);
-
   /* ---------- Render ---------- */
 
   if (book === undefined) {
@@ -400,7 +710,9 @@ export default function Reader({ id }: { id: string }) {
     return (
       <div className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-4 px-6 text-center">
         <h1 className="font-display text-3xl font-semibold">We couldn’t find that book</h1>
-        <p className="text-fg-2">It may have been removed from this browser, or the link is out of date.</p>
+        <p className="text-fg-2">
+          It may belong to a different profile, have been removed from this browser, or the link is out of date.
+        </p>
         <Link href="/" className="btn-primary">
           <ArrowLeft className="h-4 w-4" strokeWidth={1.75} /> Back to shelf
         </Link>
@@ -409,29 +721,9 @@ export default function Reader({ id }: { id: string }) {
   }
 
   const total = book.chapters.length;
-  const ci = clamp(chapterIndex, 0, total - 1);
-  const chapter = book.chapters[ci];
+  const visibleChapter = book.chapters[ci];
   const percent = clamp(Math.round(((ci + ratio) / total) * 100), 0, 100);
   const colors = readerColors(prefs);
-
-  function toggleRead() {
-    if (reading) {
-      readStop.current?.();
-      readStop.current = null;
-      setReading(false);
-      return;
-    }
-    if (!narrator) return;
-    setReading(true);
-    readStop.current = readAloud(chapter.paragraphs, narrator, {
-      onStart: (i) => document.querySelector<HTMLElement>(`[data-p="${i}"]`)?.scrollIntoView({ block: 'center' }),
-      onDone: (completed) => {
-        readStop.current = null;
-        setReading(false);
-        if (completed) notify('Finished reading this chapter.');
-      },
-    });
-  }
   const double = prefs.layout === 'double';
   const width = COLUMN_WIDTH[prefs.margin][double ? 'double' : 'single'];
   const rootStyle = {
@@ -440,21 +732,27 @@ export default function Reader({ id }: { id: string }) {
     '--reader-fg': colors.fg,
   } as CSSProperties;
   const ruleColor = { borderColor: `color-mix(in srgb, ${colors.fg} 15%, transparent)` };
-  const chapterHighlights = highlightsByChapter.get(ci);
+  const totalWords = audio?.words.length ?? 0;
 
   return (
-    <div style={rootStyle} className="min-h-screen transition-colors duration-500 ease-soft">
-      <header className="glass sticky top-0 z-30 flex items-center gap-2 bg-[rgb(20_20_28/0.92)] px-4 py-3 sm:gap-3 sm:px-6">
-        <Link href="/" className="icon-btn shrink-0" aria-label="Back to shelf">
+    <div style={rootStyle} className="reader-root min-h-screen transition-colors duration-500 ease-soft">
+      <header
+        className="sticky top-0 z-30 flex flex-wrap items-center gap-x-1 gap-y-1.5 border-b px-2 py-2 sm:flex-nowrap sm:gap-2 sm:px-6 sm:py-3"
+        style={{
+          backgroundColor: `color-mix(in srgb, ${colors.bg} 88%, transparent)`,
+          borderColor: `color-mix(in srgb, ${colors.fg} 12%, transparent)`,
+        }}
+      >
+        <Link href="/" className="reader-icon shrink-0" aria-label="Back to shelf">
           <ArrowLeft className="h-4 w-4" strokeWidth={1.75} />
         </Link>
-        <div className="min-w-0 flex-1 text-center">
-          <p className="truncate text-sm font-semibold text-fg">{book.title}</p>
-          <p className="truncate text-xs text-fg-3">{chapter.title}</p>
+        <div className="min-w-0 flex-1 px-1 text-center">
+          <p className="truncate text-[13px] font-semibold sm:text-sm">{book.title}</p>
+          <p className="truncate text-[11px] opacity-60 sm:text-xs">{visibleChapter.title}</p>
         </div>
         <button
           type="button"
-          className="icon-btn shrink-0"
+          className="reader-icon shrink-0"
           aria-label={currentBookmark ? 'Remove bookmark' : 'Bookmark this spot'}
           aria-pressed={!!currentBookmark}
           onClick={toggleBookmark}
@@ -465,112 +763,144 @@ export default function Reader({ id }: { id: string }) {
             <BookmarkIcon className="h-4 w-4" strokeWidth={1.75} />
           )}
         </button>
-        <button type="button" className="icon-btn shrink-0" aria-label="Notes and highlights" onClick={() => setPanel('notes')}>
-          <NotebookPen className="h-4 w-4" strokeWidth={1.75} />
-        </button>
-        {ttsSupported && (
-          <button
-            type="button"
-            className="icon-btn shrink-0"
-            aria-label={reading ? 'Stop reading aloud' : 'Read this chapter aloud'}
-            aria-pressed={reading}
-            onClick={toggleRead}
-            disabled={!narrator}
-          >
-            {reading ? <Square className="h-4 w-4" strokeWidth={1.75} /> : <Volume2 className="h-4 w-4" strokeWidth={1.75} />}
+        {/* On a phone these get a row of their own: seven 40px buttons do not fit
+            beside a title at 320px, and shrinking the title to nothing is worse
+            than one extra 34px row. */}
+        <div className="order-3 flex w-full items-center justify-between gap-0.5 sm:order-none sm:w-auto sm:justify-end sm:gap-2">
+          <button type="button" className="reader-icon" aria-label="Notes and highlights" onClick={() => setPanel('notes')}>
+            <NotebookPen className="h-4 w-4" strokeWidth={1.75} />
           </button>
-        )}
-        <button type="button" className="icon-btn shrink-0" aria-label="Smart summary" onClick={() => setPanel('summary')}>
-          <Sparkles className="h-4 w-4" strokeWidth={1.75} />
-        </button>
-        <button type="button" className="icon-btn shrink-0" aria-label="Chapters" onClick={() => setPanel('chapters')}>
-          <List className="h-4 w-4" strokeWidth={1.75} />
-        </button>
-        <button type="button" className="icon-btn shrink-0" aria-label="Reading settings" onClick={() => setPanel('settings')}>
-          <Type className="h-4 w-4" strokeWidth={1.75} />
-        </button>
+          {ttsSupported && (
+            <button
+              type="button"
+              className="reader-icon"
+              aria-label={reading ? 'Pause reading aloud' : 'Read aloud from this page'}
+              aria-pressed={reading}
+              onClick={toggleRead}
+            >
+              {reading ? <Pause className="h-4 w-4" fill="currentColor" strokeWidth={0} /> : <Volume2 className="h-4 w-4" strokeWidth={1.75} />}
+            </button>
+          )}
+          <button type="button" className="reader-icon" aria-label="Smart summary" onClick={() => setPanel('summary')}>
+            <Sparkles className="h-4 w-4" strokeWidth={1.75} />
+          </button>
+          <button type="button" className="reader-icon" aria-label="Chapters" onClick={() => setPanel('chapters')}>
+            <List className="h-4 w-4" strokeWidth={1.75} />
+          </button>
+          <button type="button" className="reader-icon" aria-label="Reading settings" onClick={() => setPanel('settings')}>
+            <Type className="h-4 w-4" strokeWidth={1.75} />
+          </button>
+        </div>
         <span
           aria-hidden
-          className="absolute bottom-0 left-0 h-1 w-full origin-left bg-gradient-to-r from-violet to-magenta transition-transform duration-500 ease-soft"
+          className="absolute bottom-0 left-0 h-[3px] w-full origin-left bg-gradient-to-r from-violet to-magenta transition-transform duration-500 ease-soft"
           style={{ transform: `scaleX(${percent / 100})` }}
         />
       </header>
 
-      <main className="mx-auto px-6 pb-32 pt-14" style={{ maxWidth: width }}>
+      {/* On a phone the side padding is as wide as the fixed chapter arrows, so an
+          arrow never sits on top of a word. On a wide screen the text column is
+          narrower than the viewport and the arrows sit beside it anyway. */}
+      <main className="mx-auto w-full px-11 pb-40 pt-8 sm:px-6 sm:pt-14" style={{ maxWidth: width }}>
         <article
           ref={articleRef}
           key={`${ci}-${navCount}`}
-          className="animate-page-in"
+          className={'reader-article animate-page-in' + (ttsSupported ? ' audio-ready' : '')}
           style={{ columnCount: double ? 2 : 1, columnGap: '4rem' }}
           onMouseUp={handleSelectionEnd}
           onTouchEnd={handleSelectionEnd}
           onClick={handleArticleClick}
+          onDoubleClick={handleDoubleClick}
+          onPointerDown={handlePointerDown}
         >
           <p className="text-xs font-semibold uppercase tracking-[0.2em] opacity-60">
             Chapter {ci + 1} of {total}
           </p>
-          <h1 className="mb-10 mt-3 font-display text-[32px] font-semibold leading-10" style={{ breakAfter: 'avoid' }}>
-            {chapter.title}
+          <h1 className="mb-6 mt-2 font-display text-[28px] font-semibold leading-9 sm:mb-8 sm:mt-3 sm:text-[32px] sm:leading-10" style={{ breakAfter: 'avoid' }}>
+            {visibleChapter.title}
           </h1>
-          {chapter.paragraphs.map((p: string, i: number) => {
-            const marks = chapterHighlights?.get(i) ?? [];
-            return (
-              <p
-                key={i}
-                data-p={i}
-                style={{
-                  fontFamily: FONT_FAMILY[prefs.font],
-                  fontSize: `${prefs.size}px`,
-                  lineHeight: prefs.lineHeight,
-                  marginBottom: '1em',
-                  hyphens: 'auto',
-                }}
-              >
-                {marks.length === 0
-                  ? p
-                  : splitByHighlights(p, marks).map((seg, k) =>
-                      seg.highlight ? (
-                        <mark
-                          key={k}
-                          data-h={seg.highlight.id}
-                          className="cursor-pointer rounded-[3px] text-inherit"
-                          style={{
-                            background: `${HIGHLIGHT_COLORS[seg.highlight.color].hex}59`,
-                            color: 'inherit',
-                          }}
-                        >
-                          {seg.text}
-                        </mark>
-                      ) : (
-                        <span key={k}>{seg.text}</span>
-                      ),
-                    )}
-              </p>
-            );
-          })}
+          {ttsSupported && !audioStarted && (
+            <p className="mb-6 flex items-start gap-2 rounded-input border px-3 py-2 text-xs leading-5 opacity-70" style={ruleColor}>
+              <Volume2 className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.75} />
+              <span>Tap any word to hear the chapter from that word, or press the speaker to start from this page.</span>
+            </p>
+          )}
+          {chapter && (
+            <ChapterText
+              chapter={chapter}
+              wordsByParagraph={wordsByParagraph}
+              marksByParagraph={marksByParagraph}
+              font={prefs.font}
+              fontSize={prefs.size}
+              lineHeight={prefs.lineHeight}
+            />
+          )}
         </article>
 
-        <nav className="mt-16 flex items-center justify-between gap-4 border-t pt-6" style={ruleColor}>
-          <button
-            type="button"
-            className="btn-ghost"
-            style={{ color: colors.fg }}
-            disabled={ci === 0}
-            onClick={() => goTo(ci - 1)}
-          >
+        <nav className="mt-16 flex items-center justify-between gap-3 border-t pt-6" style={ruleColor}>
+          <button type="button" className="btn-ghost" style={{ color: colors.fg }} disabled={ci === 0} onClick={() => goTo(ci - 1)}>
             <ChevronLeft className="h-4 w-4" strokeWidth={1.75} /> Previous
           </button>
           <span className="text-xs tabular-nums opacity-60">{percent}% read</span>
-          <button
-            type="button"
-            className="btn-primary"
-            disabled={ci >= total - 1}
-            onClick={() => goTo(ci + 1)}
-          >
+          <button type="button" className="btn-primary" disabled={ci >= total - 1} onClick={() => goTo(ci + 1)}>
             Next <ChevronRight className="h-4 w-4" strokeWidth={1.75} />
           </button>
         </nav>
       </main>
+
+      {/* Floating chapter arrows: reachable from any scroll position. */}
+      <button
+        type="button"
+        className="reader-nav left-0 sm:left-4"
+        style={{ color: colors.fg, borderColor: `color-mix(in srgb, ${colors.fg} 20%, transparent)`, backgroundColor: `color-mix(in srgb, ${colors.bg} 70%, ${colors.fg} 8%)` }}
+        onClick={() => goTo(ci - 1)}
+        disabled={ci === 0}
+        aria-label="Previous chapter"
+        title="Previous chapter"
+      >
+        <ChevronLeft className="h-5 w-5" strokeWidth={2} />
+      </button>
+      <button
+        type="button"
+        className="reader-nav right-0 sm:right-4"
+        style={{ color: colors.fg, borderColor: `color-mix(in srgb, ${colors.fg} 20%, transparent)`, backgroundColor: `color-mix(in srgb, ${colors.bg} 70%, ${colors.fg} 8%)` }}
+        onClick={() => goTo(ci + 1)}
+        disabled={ci >= total - 1}
+        aria-label="Next chapter"
+        title="Next chapter"
+      >
+        <ChevronRight className="h-5 w-5" strokeWidth={2} />
+      </button>
+
+      {audioStarted && audio && (
+        <AudioPlayer
+          title={book.title}
+          chapter={visibleChapter.title}
+          wordIndex={wordIndex}
+          totalWords={totalWords}
+          playing={reading}
+          speed={speed}
+          follow={follow}
+          onToggle={() => {
+            const engine = engineRef.current;
+            if (!engine) return;
+            // Pressing play after the chapter has finished starts it again.
+            if (!engine.isPlaying && engine.currentWord >= totalWords - 1) engine.seekToWord(0);
+            engine.toggle();
+          }}
+          onBack={() => engineRef.current?.skip(-10)}
+          onForward={() => engineRef.current?.skip(10)}
+          onSeek={seekWord}
+          onSpeed={changeSpeed}
+          onFollow={() => {
+            // Turning follow back on should bring the voice into view at once,
+            // not wait for the next word to be spoken.
+            if (!follow) paintWord(wordIndexRef.current, true);
+            setFollow((f) => !f);
+          }}
+          onClose={disposeEngine}
+        />
+      )}
 
       {toolbar && (
         <SelectionToolbar
@@ -602,9 +932,7 @@ export default function Reader({ id }: { id: string }) {
           onClose={() => setPanel(null)}
         />
       )}
-      {panel === 'summary' && (
-        <SummaryPanel book={book} currentChapter={ci} onClose={() => setPanel(null)} />
-      )}
+      {panel === 'summary' && <SummaryPanel book={book} currentChapter={ci} onClose={() => setPanel(null)} />}
       {panel === 'settings' && (
         <SettingsPanel
           prefs={prefs}
