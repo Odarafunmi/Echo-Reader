@@ -73,14 +73,25 @@ export function paragraphsFromPlain(text: string): string[] {
 const PART_WORDS = 4000;
 const SINGLE_CHAPTER_WORDS = 6000;
 
+/** Where one chapter's body starts and ends in the cleaned paragraph list. */
+export interface ChapterRange {
+  title: string;
+  /** First paragraph of the body (inclusive). */
+  start: number;
+  /** Last paragraph of the body (exclusive). */
+  end: number;
+}
+
 /**
- * Splits a flat list of paragraphs into chapters.
+ * Works out the chapter boundaries without copying any text, so a caller that
+ * carries per-paragraph data (a PDF's page numbers, say) can slice it the same way.
+ *
  * 1. If there are at least two recognisable headings, each heading starts a chapter.
  * 2. Otherwise long text is cut into parts of about 4,000 words at paragraph breaks.
  * 3. Short text becomes a single chapter.
  */
-export function chaptersFromParagraphs(paragraphs: string[], fallbackTitle: string): Chapter[] {
-  const cleaned = paragraphs.map((p) => p.replace(/\s+/g, ' ').trim()).filter(Boolean);
+export function chapterRanges(raw: string[], fallbackTitle: string): ChapterRange[] {
+  const cleaned = raw.map((p) => p.replace(/\s+/g, ' ').trim()).filter(Boolean);
   const headingIdx: number[] = [];
   cleaned.forEach((p, i) => {
     if (isHeading(p)) headingIdx.push(i);
@@ -98,35 +109,43 @@ export function chaptersFromParagraphs(paragraphs: string[], fallbackTitle: stri
       return { title: head, bodyStart: i + 1 };
     };
 
-    const chapters: Chapter[] = [];
+    const ranges: ChapterRange[] = [];
     if (headingIdx[0] > 0) {
-      chapters.push({ title: 'Opening', paragraphs: cleaned.slice(0, headingIdx[0]) });
+      ranges.push({ title: 'Opening', start: 0, end: headingIdx[0] });
     }
     headingIdx.forEach((start, k) => {
       const end = k + 1 < headingIdx.length ? headingIdx[k + 1] : cleaned.length;
       const { title, bodyStart } = titleOf(start);
-      chapters.push({ title, paragraphs: cleaned.slice(Math.min(bodyStart, end), end) });
+      ranges.push({ title, start: Math.min(bodyStart, end), end });
     });
-    return chapters.filter((c) => c.paragraphs.length > 0);
+    return ranges.filter((r) => r.end > r.start);
   }
 
   const total = cleaned.reduce((n, p) => n + wordCount(p), 0);
   if (total <= SINGLE_CHAPTER_WORDS) {
-    return cleaned.length ? [{ title: fallbackTitle, paragraphs: cleaned }] : [];
+    return cleaned.length ? [{ title: fallbackTitle, start: 0, end: cleaned.length }] : [];
   }
 
-  const parts: Chapter[] = [];
-  let cur: string[] = [];
+  const parts: ChapterRange[] = [];
+  let from = 0;
   let curWords = 0;
-  for (const p of cleaned) {
-    cur.push(p);
+  cleaned.forEach((p, i) => {
     curWords += wordCount(p);
     if (curWords >= PART_WORDS) {
-      parts.push({ title: `Part ${parts.length + 1}`, paragraphs: cur });
-      cur = [];
+      parts.push({ title: `Part ${parts.length + 1}`, start: from, end: i + 1 });
+      from = i + 1;
       curWords = 0;
     }
+  });
+  if (from < cleaned.length) {
+    parts.push({ title: `Part ${parts.length + 1}`, start: from, end: cleaned.length });
   }
-  if (cur.length) parts.push({ title: `Part ${parts.length + 1}`, paragraphs: cur });
   return parts;
+}
+
+export function chaptersFromParagraphs(paragraphs: string[], fallbackTitle: string): Chapter[] {
+  const cleaned = paragraphs.map((p) => p.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  return chapterRanges(cleaned, fallbackTitle)
+    .map((r) => ({ title: r.title, paragraphs: cleaned.slice(r.start, r.end) }))
+    .filter((c) => c.paragraphs.length > 0);
 }

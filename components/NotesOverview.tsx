@@ -4,8 +4,9 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { Bookmark as BookmarkIcon, ArrowUpRight, Search, Trash2 } from 'lucide-react';
 import { HIGHLIGHT_COLORS } from '@/lib/annotations';
-import { deleteAnnotation, getBookContent, listAllAnnotations, listBooks } from '@/lib/db';
-import { queueJump } from '@/lib/library';
+import { deleteAnnotation, getBookContent, listAnnotationsForBooks } from '@/lib/db';
+import { listBooks, queueJump } from '@/lib/library';
+import { useProfile } from '@/lib/profile/useProfile';
 import type { Annotation, Bookmark, BookMeta, Highlight, Note } from '@/lib/types';
 import Toast, { type ToastState } from './Toast';
 
@@ -19,6 +20,7 @@ interface Loaded {
 
 export default function NotesOverview() {
   const router = useRouter();
+  const { profile } = useProfile();
   const [data, setData] = useState<Loaded | null | undefined>(undefined);
   const [tab, setTab] = useState<Tab>('notes');
   const [query, setQuery] = useState('');
@@ -27,8 +29,11 @@ export default function NotesOverview() {
   const notify = (text: string, tone: ToastState['tone'] = 'ok') => setToast({ id: Date.now(), text, tone });
 
   async function load() {
+    if (!profile) return;
     try {
-      const [books, annotations] = await Promise.all([listBooks(), listAllAnnotations()]);
+      // Only this profile's books, and only the notes attached to them.
+      const books = await listBooks(profile.id);
+      const annotations = await listAnnotationsForBooks(books.map((b) => b.id));
       const withNotes = new Set(annotations.map((a) => a.bookId));
       const contents = await Promise.all(
         books.filter((b) => withNotes.has(b.id)).map((b) => getBookContent(b.id)),
@@ -42,8 +47,10 @@ export default function NotesOverview() {
   }
 
   useEffect(() => {
+    setData(undefined);
     void load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.id]);
 
   const q = query.trim().toLowerCase();
 
@@ -100,13 +107,13 @@ export default function NotesOverview() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-6 pb-24 pt-10">
+    <div className="mx-auto w-full max-w-4xl px-4 pb-24 pt-8 sm:px-6 sm:pt-10">
       <section className="animate-fade-up">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-magenta">Your margin</p>
-        <h1 className="mt-3 font-display text-[40px] font-semibold leading-tight tracking-tight sm:text-[48px] sm:leading-[56px]">
+        <h1 className="mt-2 font-display text-[30px] font-semibold leading-tight tracking-tight sm:mt-3 sm:text-[40px] md:text-[48px] md:leading-[56px]">
           Notes, <em className="font-semibold italic text-magenta">across every book.</em>
         </h1>
-        <p className="mt-3 max-w-xl text-base leading-[26px] text-fg-2">
+        <p className="mt-3 max-w-xl text-[15px] leading-6 text-fg-2 sm:text-base sm:leading-[26px]">
           Everything you have noted, highlighted or bookmarked, in one place. Open any item to jump back to its spot in the text.
         </p>
       </section>
@@ -121,7 +128,7 @@ export default function NotesOverview() {
       {data && (
         <>
           <div className="mt-8 space-y-4">
-            <div role="tablist" aria-label="Notes sections" className="flex max-w-lg gap-1 rounded-full border border-line bg-card p-1">
+            <div role="tablist" aria-label="Notes sections" className="flex w-full max-w-lg gap-1 rounded-full border border-line bg-card p-1">
               {(
                 [
                   ['notes', 'Notes', counts.notes],
@@ -136,22 +143,22 @@ export default function NotesOverview() {
                   aria-selected={tab === id}
                   onClick={() => setTab(id)}
                   className={
-                    'flex-1 rounded-full px-3 py-1.5 text-sm transition-colors duration-250 ease-soft ' +
+                    'flex-1 whitespace-nowrap rounded-full px-2 py-1.5 text-xs transition-colors duration-250 ease-soft sm:px-3 sm:text-sm ' +
                     (tab === id ? 'bg-violet text-white shadow-glow' : 'text-fg-2 hover:text-fg')
                   }
                 >
-                  {label} <span className="ml-1 text-xs opacity-70">{count}</span>
+                  {label} <span className="ml-1 hidden text-xs opacity-70 sm:inline">{count}</span>
                 </button>
               ))}
             </div>
-            <label className="flex max-w-lg items-center gap-2 rounded-input border border-line bg-card px-3 focus-within:border-violet/60">
+            <label className="flex w-full max-w-lg items-center gap-2 rounded-input border border-line bg-card px-3 focus-within:border-violet/60">
               <Search className="h-4 w-4 text-fg-3" strokeWidth={1.75} />
               <input
                 type="search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search notes, quotes and chapters"
-                className="h-10 w-full bg-transparent text-sm text-fg placeholder:text-fg-3 focus:outline-none"
+                className="h-10 w-full bg-transparent text-base text-fg placeholder:text-fg-3 focus:outline-none sm:text-sm"
               />
             </label>
           </div>

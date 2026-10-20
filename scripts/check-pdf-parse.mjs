@@ -131,6 +131,30 @@ await check('keeps every line of a page, in order', async () => {
   assert.ok(text.indexOf('Line number 1 ') < text.indexOf('Line number 12 '), 'order must be kept');
 });
 
+await check('each paragraph remembers the page it came from', async () => {
+  const pdf = buildPdf([
+    ['Chapter One begins.'],
+    ['Body text on the second page.'],
+    ['Body text on the third page.'],
+  ]);
+  const { chapters } = await parsePdf(toArrayBuffer(pdf), 'Fallback');
+  // One heading means a single chapter containing every page.
+  assert.equal(chapters.length, 1);
+  assert.deepEqual(chapters[0].pageNumbers, [1, 2, 3], 'page numbers were lost or reordered');
+  assert.equal(chapters[0].paragraphs.length, 3);
+});
+
+await check('outline-style chapters keep page numbers within each chapter', async () => {
+  const pdf = buildPdf([
+    ['Chapter One begins.', 'First page body.'],
+    ['Chapter Two begins.', 'Second page body.'],
+  ]);
+  const { chapters } = await parsePdf(toArrayBuffer(pdf), 'Fallback');
+  assert.equal(chapters.length, 2);
+  assert.deepEqual(chapters[0].pageNumbers, [1]);
+  assert.deepEqual(chapters[1].pageNumbers, [2]);
+});
+
 await check('reads the document title from PDF metadata', async () => {
   const pdf = buildPdf([['Only paragraph here.']], { title: 'The Real Title' });
   const { title } = await parsePdf(toArrayBuffer(pdf), 'Ignored Fallback');

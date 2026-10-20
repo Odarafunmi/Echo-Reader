@@ -17,3 +17,8 @@ next-env.d.ts
 
 # PDF.js worker, copied from node_modules by scripts/copy-pdf-worker.mjs
 /public/pdf.worker.min.mjs
+# OCR engine (worker, wasm cores, English model), copied by scripts/copy-ocr-assets.mjs
+/public/ocr/
+
+# Tesseract cache, written next to the working directory when the OCR engine runs
+eng.traineddata

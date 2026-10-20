@@ -26,6 +26,7 @@ import {
 import { ProviderNotConfiguredError, unconfiguredProvider } from '@/lib/voice/provider';
 import { LEVEL_BARS, useRecorder, type Take } from '@/lib/voice/useRecorder';
 import { listen, speechRecognitionSupported } from '@/lib/voice/speech';
+import { useProfile } from '@/lib/profile/useProfile';
 import type { VoiceProfile, VoiceSample } from '@/lib/types';
 import GenericVoicePicker from './GenericVoicePicker';
 import Toast, { type ToastState } from './Toast';
@@ -44,6 +45,10 @@ const scriptTotal = (samples: VoiceSample[]) =>
   samples.filter((s) => s.kind === 'script').reduce((n, s) => n + s.seconds, 0);
 
 export default function VoiceStudio() {
+  // Voice data belongs to the signed-in profile, like the shelf does. The gate
+  // guarantees there is one.
+  const { profile: signedIn } = useProfile();
+  const profileId = signedIn?.id ?? '';
   const [profile, setProfile] = useState<VoiceProfile | null | undefined>(undefined);
   const [samples, setSamples] = useState<VoiceSample[]>([]);
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -54,10 +59,11 @@ export default function VoiceStudio() {
   const dismiss = useCallback(() => setToast(null), []);
 
   const load = useCallback(async () => {
-    const [p, s] = await Promise.all([getVoiceProfile(), listVoiceSamples()]);
+    if (!profileId) return;
+    const [p, s] = await Promise.all([getVoiceProfile(profileId), listVoiceSamples(profileId)]);
     setProfile(p ?? null);
     setSamples(s);
-  }, []);
+  }, [profileId]);
 
   useEffect(() => {
     load().catch(() => {
@@ -76,7 +82,7 @@ export default function VoiceStudio() {
     try {
       const now = Date.now();
       await saveVoiceProfile({
-        id: 'me',
+        id: profileId,
         name: 'My Voice',
         consentAt: now,
         consentVersion: CONSENT_VERSION,
@@ -110,7 +116,7 @@ export default function VoiceStudio() {
   async function deleteEverything() {
     if (!window.confirm('Delete your voice profile and every recording? This cannot be undone.')) return;
     try {
-      await deleteAllVoiceData();
+      await deleteAllVoiceData(profileId);
       setConsent(false);
       await load();
       notify('Your voice data was deleted');
@@ -120,13 +126,13 @@ export default function VoiceStudio() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl px-6 pb-24 pt-10">
+    <div className="mx-auto w-full max-w-4xl px-4 pb-24 pt-8 sm:px-6 sm:pt-10">
       <section className="animate-fade-up">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-mist">Voice Studio</p>
-        <h1 className="mt-3 font-display text-[40px] font-semibold leading-tight tracking-tight sm:text-[48px] sm:leading-[56px]">
+        <h1 className="mt-2 font-display text-[30px] font-semibold leading-tight tracking-tight sm:mt-3 sm:text-[40px] md:text-[48px] md:leading-[56px]">
           Record your voice, <em className="font-semibold italic text-violet-mist">once.</em>
         </h1>
-        <p className="mt-3 max-w-xl text-base leading-[26px] text-fg-2">
+        <p className="mt-3 max-w-xl text-[15px] leading-6 text-fg-2 sm:text-base sm:leading-[26px]">
           A short, guided recording gives Echo Shelf a sample of your voice. You verify it with one read-aloud, and it stays on this device until a voice provider is connected.
         </p>
       </section>
@@ -163,11 +169,11 @@ export default function VoiceStudio() {
         )}
 
         {profile && step === 'record' && (
-          <RecordStep samples={samples} seconds={seconds} onChanged={load} notify={notify} />
+          <RecordStep samples={samples} seconds={seconds} onChanged={load} notify={notify} profileId={profileId} />
         )}
 
         {profile && step === 'verify' && (
-          <VerifyStep onVerified={markVerified} notify={notify} seconds={seconds} />
+          <VerifyStep onVerified={markVerified} notify={notify} seconds={seconds} profileId={profileId} />
         )}
 
         {profile && step === 'ready' && (
@@ -226,11 +232,13 @@ function RecordStep({
   seconds,
   onChanged,
   notify,
+  profileId,
 }: {
   samples: VoiceSample[];
   seconds: number;
   onChanged: () => Promise<void>;
   notify: (text: string, tone?: ToastState['tone']) => void;
+  profileId: string;
 }) {
   const recordedIds = useMemo(() => new Set(samples.filter((s) => s.kind === 'script').map((s) => s.label)), [samples]);
   const firstOpen = Math.max(0, SCRIPT.findIndex((p) => !recordedIds.has(p.id)));
@@ -287,7 +295,7 @@ function RecordStep({
       }
       await addVoiceSample({
         id: newId(),
-        profileId: 'me',
+        profileId,
         kind: 'script',
         label: passage.id,
         seconds: Math.round(take.seconds * 10) / 10,
@@ -472,10 +480,12 @@ function VerifyStep({
   onVerified,
   notify,
   seconds,
+  profileId,
 }: {
   onVerified: () => Promise<void>;
   notify: (text: string, tone?: ToastState['tone']) => void;
   seconds: number;
+  profileId: string;
 }) {
   const [phrase, setPhrase] = useState(() => pickVerifyPhrase());
   const [supported, setSupported] = useState<boolean | null>(null);
@@ -514,7 +524,7 @@ function VerifyStep({
       if (ratio >= VERIFY_THRESHOLD) {
         await addVoiceSample({
           id: newId(),
-          profileId: 'me',
+          profileId,
           kind: 'verify',
           label: phrase,
           seconds: Math.round(take.seconds * 10) / 10,

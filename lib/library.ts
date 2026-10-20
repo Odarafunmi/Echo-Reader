@@ -1,70 +1,150 @@
-// Client-side library helpers: importing files, reading progress and reader preferences.
-import { deleteBook, getBookContent, getBookMeta, listBooks, saveBook } from './db';
-import { parseFile } from './parse';
+// Client-side library helpers: importing files, covers, reading progress and
+// reader preferences.
+//
+// Everything here is profile aware. A book records its owner at import time, every
+// shelf read is filtered by the signed-in profile, and reading positions are kept
+// under a per-profile key so two people sharing a browser do not inherit each
+// other's place in a book.
+
+import { deleteBook, getBookContent, getBookMeta, listBooks, putBookMeta, saveBook } from './db';
+import { parseFile, type ImportProgress } from './parse';
 import { countWords } from './parse/text';
-import type { Book, BookMeta, Progress, ReaderPrefs } from './types';
+import { chooseCoverColor, customCover, isValidCoverDataUrl } from './covers';
+import type { Book, BookMeta, BookCover, Progress, ReaderPrefs } from './types';
 
-export const COVER_PALETTES = [
-  ['#8B5CF6', '#E879F9'],
-  ['#22D3EE', '#7C3AED'],
-  ['#FBBF24', '#7C3AED'],
-  ['#34D399', '#4C1D95'],
-  ['#FB7185', '#6D28D9'],
-] as const;
+export { listBooks, deleteBook, putBookMeta };
 
-export function coverGradient(tint: number): string {
-  const [a, b] = COVER_PALETTES[((tint % COVER_PALETTES.length) + COVER_PALETTES.length) % COVER_PALETTES.length];
-  return `linear-gradient(160deg, ${a} 0%, ${b} 100%)`;
+export interface ImportOptions {
+  /** Called as a long import moves through pages, so the shelf can say what it is doing. */
+  onProgress?: (progress: ImportProgress) => void;
+  signal?: AbortSignal;
 }
 
-export async function importFile(file: File): Promise<BookMeta> {
-  const parsed = await parseFile(file);
+/**
+ * Parses a file and saves it under `profileId`, with a cover.
+ *
+ * The cover is the PDF's first page when that page has something on it, and a
+ * solid-colour title cover otherwise. The palette entry is chosen from the colours
+ * already on this profile's shelf, so a new book balances the shelf.
+ */
+export async function importFile(file: File, profileId: string, opts: ImportOptions = {}): Promise<BookMeta> {
+  const parsed = await parseFile(file, opts);
   const id = crypto.randomUUID();
+
+  const shelf = await listBooks(profileId);
+  const usedColors = shelf.map((b) => b.coverColor).filter((n): n is number => Number.isInteger(n));
+  const coverColor = chooseCoverColor(`${parsed.title}:${id}`, usedColors);
+
+  let cover: BookCover | null = null;
+  if (parsed.cover && isValidCoverDataUrl(parsed.cover.dataUrl)) {
+    cover = parsed.cover;
+  } else {
+    cover = customCover(parsed.title, parsed.author, coverColor);
+  }
+
   const meta: BookMeta = {
     id,
+    profileId,
     title: parsed.title,
     author: parsed.author,
     format: parsed.format,
     addedAt: Date.now(),
     wordCount: countWords(parsed.chapters),
     chapterCount: parsed.chapters.length,
-    tint: Math.floor(Math.random() * COVER_PALETTES.length),
+    coverColor,
+    ...(cover ? { cover } : {}),
   };
-  await saveBook(meta, { id, chapters: parsed.chapters });
+  await saveBook(meta, { id, chapters: parsed.chapters, pageCount: parsed.pageCount });
   return meta;
 }
 
-export async function loadBook(id: string): Promise<Book | null> {
+/** Loads a book, but only when the signed-in profile owns it. */
+export async function loadBook(id: string, profileId: string): Promise<Book | null> {
   const [meta, content] = await Promise.all([getBookMeta(id), getBookContent(id)]);
-  if (!meta || !content) return null;
-  return { ...meta, chapters: content.chapters };
+  if (!meta || !content || meta.profileId !== profileId) return null;
+  return { ...withColor(meta), chapters: content.chapters };
 }
 
-export { listBooks, deleteBook };
+function withColor(meta: BookMeta): BookMeta {
+  if (Number.isInteger(meta.coverColor)) return meta;
+  return { ...meta, coverColor: chooseCoverColor(`${meta.title}:${meta.id}`) };
+}
 
-// ---- Progress (localStorage) ----
+/**
+ * Fills in a cover for books saved before covers existed (or whose drawing failed
+ * on a browser that blocked canvas). The result is saved, so this runs once.
+ */
+export async function ensureCovers(books: BookMeta[], profileId: string): Promise<BookMeta[]> {
+  const used = books.map((b) => b.coverColor).filter((n): n is number => Number.isInteger(n));
+  const out: BookMeta[] = [];
+  for (const book of books) {
+    if (book.profileId !== profileId) continue;
+    if (book.cover && isValidCoverDataUrl(book.cover.dataUrl)) {
+      out.push(book);
+      continue;
+    }
+    const color = Number.isInteger(book.coverColor)
+      ? (book.coverColor as number)
+      : chooseCoverColor(`${book.title}:${book.id}`, used);
+    const cover = customCover(book.title, book.author, color);
+    const next: BookMeta = { ...book, profileId, coverColor: color, ...(cover ? { cover } : {}) };
+    try {
+      await putBookMeta(next);
+    } catch {
+      // If the write fails the shelf still shows the colour and the title.
+    }
+    out.push(next);
+  }
+  return out;
+}
 
-const PROGRESS_KEY = 'echo-shelf:progress:v1';
+// ---- Progress (localStorage, one map per profile) ----
+
+const progressKey = (profileId: string) => `echo-shelf:progress:v2:${profileId}`;
+/** The key used before libraries were split by profile. */
+const LEGACY_PROGRESS_KEY = 'echo-shelf:progress:v1';
+
 export type ProgressMap = Record<string, Progress>;
 
-export function getProgressMap(): ProgressMap {
+function readMap(key: string): ProgressMap {
   try {
-    return JSON.parse(localStorage.getItem(PROGRESS_KEY) ?? '{}') as ProgressMap;
+    return JSON.parse(localStorage.getItem(key) ?? '{}') as ProgressMap;
   } catch {
     return {};
   }
 }
 
-export function saveProgress(id: string, p: Progress): void {
-  const map = getProgressMap();
-  map[id] = p;
-  localStorage.setItem(PROGRESS_KEY, JSON.stringify(map));
+export function getProgressMap(profileId: string): ProgressMap {
+  return readMap(progressKey(profileId));
 }
 
-export function clearProgress(id: string): void {
-  const map = getProgressMap();
+export function saveProgress(profileId: string, id: string, p: Progress): void {
+  const map = getProgressMap(profileId);
+  map[id] = p;
+  localStorage.setItem(progressKey(profileId), JSON.stringify(map));
+}
+
+export function clearProgress(profileId: string, id: string): void {
+  const map = getProgressMap(profileId);
   delete map[id];
-  localStorage.setItem(PROGRESS_KEY, JSON.stringify(map));
+  localStorage.setItem(progressKey(profileId), JSON.stringify(map));
+}
+
+/**
+ * Moves reading positions saved before profiles were introduced to the profile
+ * signing in now, so an older shelf does not lose its bookmarks. Runs once; the
+ * old key is removed afterwards so a second profile cannot inherit them.
+ */
+export function migrateLegacyProgress(profileId: string): void {
+  try {
+    const legacy = localStorage.getItem(LEGACY_PROGRESS_KEY);
+    if (!legacy) return;
+    const target = progressKey(profileId);
+    if (!localStorage.getItem(target)) localStorage.setItem(target, legacy);
+    localStorage.removeItem(LEGACY_PROGRESS_KEY);
+  } catch {
+    // No storage: nothing to migrate.
+  }
 }
 
 /** Overall percent through the book, from chapter index plus scroll position within it. */
@@ -74,7 +154,7 @@ export function progressPercent(p: Progress | undefined, chapterCount: number): 
   return Math.round(Math.min(Math.max(frac, 0), 1) * 100);
 }
 
-// ---- Reader preferences (localStorage) ----
+// ---- Reader preferences (localStorage, shared by the device) ----
 
 const PREFS_KEY = 'echo-shelf:prefs:v1';
 

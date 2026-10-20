@@ -145,7 +145,7 @@ export default function NotesPanel(props: Props) {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search your notes"
-              className="h-10 w-full bg-transparent text-sm text-fg placeholder:text-fg-3 focus:outline-none"
+              className="h-10 w-full bg-transparent text-base text-fg placeholder:text-fg-3 focus:outline-none sm:text-sm"
             />
           </label>
         </div>
@@ -239,7 +239,7 @@ export default function NotesPanel(props: Props) {
                 }}
                 rows={2}
                 placeholder="Jot down a thought…"
-                className="w-full resize-none rounded-input border border-line bg-card px-3 py-2 text-sm text-fg placeholder:text-fg-3 focus:border-magenta/60 focus:outline-none"
+                className="w-full resize-none rounded-input border border-line bg-card px-3 py-2 text-base text-fg placeholder:text-fg-3 focus:border-magenta/60 focus:outline-none sm:text-sm"
               />
             </label>
             <div className="mt-3 flex items-center justify-between">
@@ -320,7 +320,7 @@ function NoteEditor({ initial, onSave, onCancel }: { initial: string; onSave: (b
           if (e.key === 'Escape') onCancel();
         }}
         rows={3}
-        className="w-full resize-none rounded-input border border-line bg-ink px-3 py-2 text-sm text-fg focus:border-magenta/60 focus:outline-none"
+        className="w-full resize-none rounded-input border border-line bg-ink px-3 py-2 text-base text-fg focus:border-magenta/60 focus:outline-none sm:text-sm"
       />
       <div className="mt-2 flex justify-end gap-2">
         <button type="button" className="btn-ghost h-8 px-3 text-xs" onClick={onCancel}>

@@ -257,3 +257,227 @@
 :root[data-theme='light'] :focus-visible {
   outline-color: #7c3aed;
 }
+
+/* ---------- Small screens ----------
+   No page should ever scroll sideways. `clip` rather than `hidden`: unlike hidden
+   it does not turn the root into a scroll container, so the sticky top bars keep
+   working. The viewport meta tag in app/layout.tsx sets width=device-width, which
+   is what stops a phone laying the page out at 980px and asking for a zoom-out. */
+html,
+body {
+  max-width: 100%;
+  overflow-x: clip;
+}
+img,
+video,
+canvas {
+  max-width: 100%;
+}
+
+/* Smaller circles on a phone: the top bar holds a lot of them. */
+.icon-btn {
+  width: 40px;
+  height: 40px;
+}
+@media (min-width: 640px) {
+  .icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* ---------- Reader ---------- */
+
+/* Header controls follow the reader's own colours instead of the app's dark ones,
+   so they stay visible on Paper and Sepia as well as Midnight. */
+.reader-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 9999px;
+  border: 1px solid color-mix(in srgb, var(--reader-fg) 18%, transparent);
+  background: color-mix(in srgb, var(--reader-fg) 7%, transparent);
+  color: color-mix(in srgb, var(--reader-fg) 72%, transparent);
+  transition: color 200ms, border-color 200ms, background-color 200ms, transform 150ms;
+}
+.reader-icon:hover {
+  color: var(--reader-fg);
+  border-color: color-mix(in srgb, var(--reader-fg) 34%, transparent);
+}
+.reader-icon:active {
+  transform: scale(0.96);
+}
+@media (min-width: 640px) {
+  .reader-icon {
+    width: 42px;
+    height: 42px;
+  }
+}
+
+/* Floating chapter arrows, fixed at mid-height so they are reachable without
+   scrolling to the end of the chapter. Subtle until hovered or focused. */
+.reader-nav {
+  position: fixed;
+  top: 50%;
+  translate: 0 -50%;
+  z-index: 35;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 9999px;
+  border: 1px solid;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  opacity: 0.5;
+  transition: opacity 200ms ease, scale 200ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.reader-nav:hover,
+.reader-nav:focus-visible {
+  opacity: 1;
+  scale: 1.04;
+}
+.reader-nav:disabled {
+  opacity: 0.16;
+  pointer-events: none;
+}
+/* On a phone the arrows sit over the page margin rather than over the words:
+   the reader's main column carries a matching side inset (see Reader.tsx). */
+@media (max-width: 639px) {
+  .reader-nav {
+    /* A full 44px touch target, matching the text's side inset. */
+    width: 44px;
+    height: 44px;
+  }
+}
+@media (min-width: 640px) {
+  .reader-nav {
+    width: 40px;
+    height: 40px;
+    opacity: 0.55;
+  }
+}
+
+/* Every word is its own span so it can be tapped and highlighted. */
+.word {
+  border-radius: 3px;
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.audio-ready .word {
+  cursor: pointer;
+}
+.word-marked {
+  border-radius: 2px;
+}
+/* The word being spoken: soft amber with transparency, never a hard highlighter. */
+.word-active {
+  background-color: rgb(251 191 36 / 0.3) !important;
+  box-shadow: 0 0 0 1px rgb(251 191 36 / 0.28);
+}
+.word-active.word-marked {
+  box-shadow: 0 0 0 1px rgb(251 191 36 / 0.38);
+}
+
+/* Page demarcation inside a chapter. A hairline either side of a small label,
+   drawn in the reader's own text colour at low opacity. */
+.page-break {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1.75rem 0 1.4rem;
+  color: color-mix(in srgb, var(--reader-fg) 42%, transparent);
+  break-inside: avoid;
+}
+.page-break-line {
+  flex: 1 1 auto;
+  height: 1px;
+  background: color-mix(in srgb, var(--reader-fg) 14%, transparent);
+}
+.page-break-label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* The narration scrubber. */
+.range-audio {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 18px;
+  background: transparent;
+  cursor: pointer;
+}
+.range-audio::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--color-fg) 18%, transparent);
+}
+.range-audio::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 9999px;
+  background: var(--color-violet);
+  box-shadow: 0 0 0 3px rgb(139 92 246 / 0.22);
+}
+.range-audio::-moz-range-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--color-fg) 18%, transparent);
+}
+.range-audio::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 9999px;
+  background: var(--color-violet);
+}
+
+/* Horizontal strips that should scroll on a phone without a visible scrollbar. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Tapping a word must be instant: no 300ms delay, and no double-tap zoom
+   turning a tap on a word into a page zoom. Pinch-to-zoom still works. */
+.reader-article {
+  touch-action: manipulation;
+}
+
+/* Two columns are a preference, but not on a phone: at 320px each column would be
+   about 120px wide, which is narrower than a word. The reader sets column-count
+   inline, so this has to win with !important. */
+@media (max-width: 639px) {
+  .reader-article {
+    column-count: 1 !important;
+    column-gap: 0 !important;
+  }
+  /* Leaves room for the two fixed chapter arrows without cutting a word. */
+  .reader-article h1 {
+    font-size: clamp(1.45rem, 7vw, 2rem);
+    line-height: 1.2;
+  }
+}
+
+/* The selection toolbar is a fixed, pill-shaped row. On a narrow phone it must fit
+   between the margins, or it would push the page sideways. */
+@media (max-width: 420px) {
+  .selection-toolbar {
+    max-width: calc(100vw - 1rem);
+    flex-wrap: wrap;
+    justify-content: center;
+    border-radius: 1.25rem;
+  }
+}

@@ -23,7 +23,7 @@ export default function Toast({ toast, onDone }: { toast: ToastState | null; onD
       key={toast.id}
       role="status"
       aria-live="polite"
-      className="glass animate-toast fixed bottom-6 left-1/2 z-50 flex max-w-md -translate-x-1/2 items-center gap-3 rounded-full px-5 py-3 text-sm shadow-lg"
+      className="glass animate-toast fixed bottom-4 left-1/2 z-50 flex w-[calc(100%-1.5rem)] max-w-md -translate-x-1/2 items-center gap-3 rounded-2xl px-4 py-3 text-sm shadow-lg sm:bottom-6 sm:rounded-full sm:px-5"
     >
       <Icon className={toast.tone === 'ok' ? 'h-5 w-5 text-mint' : 'h-5 w-5 text-rose'} strokeWidth={1.75} />
       <span className="text-fg">{toast.text}</span>
